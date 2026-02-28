@@ -1,0 +1,32 @@
+# Pose Adapter 参数配置
+
+# 相机参数
+camera:
+  width: 1280
+  height: 720
+
+# 电表物理尺寸（米）
+meter:
+  width: 0.2
+  height: 0.3
+
+# 控制参数
+control:
+  target_distance: 1.7      # 目标距离（米）
+  target_ratio: 0.65        # 目标画面占比
+  distance_tolerance: 0.25  # 距离容差
+  angle_tolerance: 2.0      # 角度容差（度）
+  center_tolerance: 0.05    # 中心偏差容差
+  max_linear_speed: 0.3     # 最大线速度
+  max_angular_speed: 0.5    # 最大角速度
+
+# 检测参数
+detection:
+  conf_threshold: 0.5
+  iou_threshold: 0.45
+
+# 追踪参数
+tracking:
+  max_age: 30
+  min_hits: 3
+  iou_threshold: 0.3
