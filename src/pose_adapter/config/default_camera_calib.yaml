@@ -1,30 +1,31 @@
-image_width: 1280
-image_height: 720
-camera_name: go2_front_camera_default_720p
+# Go2 前置相机标定结果（真机标定，替换原经验默认值）
+image_width: 1920
+image_height: 1080
+camera_name: go2_front_camera_calibrated
 
 camera_matrix:
   rows: 3
   cols: 3
-  data: [700.0, 0.0, 640.0,
-         0.0, 700.0, 360.0,
+  data: [2120.32, 0.0, 900.8,
+         0.0, 2157.94, 446.24,
          0.0, 0.0, 1.0]
 
 distortion_model: plumb_bob
 distortion_coefficients:
   rows: 1
   cols: 5
-  data: [0.1, -0.2, 0.0, 0.0, 0.05]
+  data: [-1.46741146, 3.52413962, 0.04778386, 0.07072188, -9.02907453]
 
 rectification_matrix:
   rows: 3
   cols: 3
   data: [1.0, 0.0, 0.0,
          0.0, 1.0, 0.0,
-         0.0, 1.0, 1.0]
+         0.0, 0.0, 1.0]
 
 projection_matrix:
   rows: 3
   cols: 4
-  data: [700.0, 0.0, 640.0, 0.0,
-         0.0, 700.0, 360.0, 0.0,
+  data: [2120.32, 0.0, 900.8, 0.0,
+         0.0, 2157.94, 446.24, 0.0,
          0.0, 0.0, 1.0, 0.0]
