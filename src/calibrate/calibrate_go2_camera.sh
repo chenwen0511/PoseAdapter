@@ -1,22 +1,32 @@
 #!/bin/bash
 # 宇树Go2相机标定脚本
-# 作者：编程导师
-# 使用说明：修改下方棋盘格参数后，直接执行 ./calibrate_go2_camera.sh
+# 使用说明：
+#   1. 标定工具带 GUI，需在有显示器的环境运行（接显示器的 Go2 或台式机/笔记本均可）。
+#   2. 若在 Go2 上接显示器运行：建议在本地桌面终端执行；若通过 SSH，先执行 export DISPLAY=:0 再运行本脚本。
+#   3. 若在另一台电脑运行：该机需能订阅到 /camera/image_raw（与狗同网、ROS_DOMAIN_ID 一致等）。
+#   4. 修改下方参数后执行 ./calibrate_go2_camera.sh
 
 # ===================== 请修改以下参数 =====================
-CAMERA_TOPIC="/camera/image_raw"  # Go2相机图像话题
-CHESSBOARD_SIZE="8x5"             # 棋盘格内角点数量（如9×6棋盘格填8x5）
-SQUARE_SIZE="0.025"               # 棋盘格方格边长（米），建议25mm填0.025
-CAMERA_NAME="/camera"             # 相机命名空间
-SAVE_PATH="$HOME/calibration_results"  # 建议将最终 yaml 复制到此路径，便于 read_calib_params.py 使用
+CAMERA_TOPIC="/camera/image_raw"  # Go2 相机图像话题（与狗上发布的一致）
+CHESSBOARD_SIZE="8x5"             # 棋盘格内角点数量（如 9×6 棋盘填 8x5）
+SQUARE_SIZE="0.025"               # 棋盘格方格边长（米），如 25mm 填 0.025
+CAMERA_NAME="/camera"             # 相机命名空间（单目仅一个 /camera）
+SAVE_PATH="$HOME/calibration_results"  # 标定结果 yaml 建议放此路径
 # ==========================================================
 
 # 创建保存目录（用于后续存放从 /tmp 复制或转换得到的 yaml）
 mkdir -p $SAVE_PATH
 
+# 标定工具需要 GUI。若通过 SSH 运行且接了显示器，需先设置 DISPLAY=:0
+if [ -z "${DISPLAY}" ]; then
+    echo "提示：未检测到 DISPLAY。若本机已接显示器，请先执行: export DISPLAY=:0"
+    echo "然后再运行本脚本；否则请在有显示器的电脑上运行并订阅 $CAMERA_TOPIC"
+    export DISPLAY=:0
+fi
+
 # 检查依赖
 if ! command -v ros2 &> /dev/null; then
-    echo "错误：未找到ROS2，请先source ROS2环境！"
+    echo "错误：未找到ROS2，请先 source /opt/ros/foxy/setup.bash"
     exit 1
 fi
 
