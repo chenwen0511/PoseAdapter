@@ -1,3 +1,4 @@
+<<<<<<< HEAD
 # 测试用标定 yaml（ROS camera_calibration 格式）
 # 仅用于 tests，勿作真机标定使用
 image_width: 1280
@@ -11,3 +12,18 @@ distortion_coefficients:
   rows: 1
   cols: 5
   data: [0.1, -0.2, 0.0, 0.0, 0.05]
+=======
+# 测试用标定 yaml（ROS camera_calibration 格式）
+# 仅用于 tests，勿作真机标定使用
+image_width: 1280
+image_height: 720
+camera_matrix:
+  rows: 3
+  cols: 3
+  data: [700.0, 0.0, 640.0, 0.0, 700.0, 360.0, 0.0, 0.0, 1.0]
+distortion_model: plumb_bob
+distortion_coefficients:
+  rows: 1
+  cols: 5
+  data: [0.1, -0.2, 0.0, 0.0, 0.05]
+>>>>>>> a5a410c (add default camera calib yaml)

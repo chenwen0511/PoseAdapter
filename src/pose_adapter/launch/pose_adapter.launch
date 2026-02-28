@@ -6,7 +6,7 @@
   <arg name="camera_height" default="720"/>
 
   <!-- Go2 网络接口（Unitree SDK 使用的网卡，例如 eth0） -->
-  <arg name="network_interface" default="eth0"/>
+  <arg name="network_interface" default=""/>
   
   <!-- 电表尺寸（米） -->
   <arg name="meter_width" default="0.1"/>
@@ -17,11 +17,11 @@
   <arg name="target_ratio" default="0.5"/>
   
   <!-- 模型路径 -->
-  <arg name="yolo_model_path" default="models/yolov8n.pt"/>
-  <arg name="use_paddle_ocr" default="true"/>
+  <arg name="yolo_model_path" default=""/>
+  <arg name="use_paddle_ocr" default="false"/>
   
-  <!-- 标定文件（留空则使用节点内默认内参） -->
-  <arg name="calib_file" default="$(find pose_adapter)/config/default_camera_calib.yaml"/>
+  <!-- 标定文件 -->
+  <arg name="calib_file" default=""/>
   
   <!-- Pose Adapter 主节点 -->
   <node name="pose_adapter" pkg="pose_adapter" type="pose_adapter_node.py" output="screen">

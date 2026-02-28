@@ -1,4 +1,11 @@
+<<<<<<< HEAD
 # 测试依赖，安装：pip install -r requirements-test.txt
 pytest>=7.0
 numpy
 PyYAML
+=======
+# 测试依赖，安装：pip install -r requirements-test.txt
+pytest>=7.0
+numpy
+PyYAML
+>>>>>>> a5a410c (add default camera calib yaml)
