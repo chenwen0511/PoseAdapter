@@ -52,6 +52,12 @@ echo "3. 标定完成后点击SAVE保存结果"
 echo "4. 最后点击COMMIT退出"
 echo "====================================="
 
+# 强制使用 X11 显示，避免 Qt 不弹窗（Go2/ARM 上常见）
+export DISPLAY="${DISPLAY:-:0}"
+export QT_QPA_PLATFORM=xcb
+# 若仍无窗口，可先手动执行：export QT_QPA_PLATFORM=xcb 和 export DISPLAY=:0 再运行
+echo "DISPLAY=$DISPLAY  QT_QPA_PLATFORM=$QT_QPA_PLATFORM"
+
 ros2 run camera_calibration cameracalibrator \
     --size $CHESSBOARD_SIZE \
     --square $SQUARE_SIZE \
@@ -65,4 +71,9 @@ echo "标定完成后，数据默认在: /tmp/calibrationdata.tar.gz"
 echo "解压后可用 camera_calibration_parsers 转为 yaml，或从终端输出的 K/D 复制。"
 echo "将生成的 calib_params.yaml 放到 $SAVE_PATH 后，运行："
 echo "  python3 read_calib_params.py -f $SAVE_PATH/calib_params.yaml"
+echo "====================================="
+echo ""
+echo "若本窗口始终不弹标定 GUI，请改用 OpenCV 标定脚本（无需 Qt 窗口或支持无头模式）："
+echo "  python3 calibrate_opencv.py -t $CAMERA_TOPIC --size $CHESSBOARD_SIZE --square $SQUARE_SIZE -o $SAVE_PATH/calib_result.yaml"
+echo "  无显示器时加 --headless 自动采集约 20 张后标定并保存。"
 echo "====================================="
