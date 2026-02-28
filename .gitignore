@@ -1,3 +1,52 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+*.egg
+*.egg-info/
+dist/
+build/
+eggs/
+.eggs/
+*.manifest
+*.spec
+.pytest_cache/
+.coverage
+htmlcov/
+.tox/
+.venv/
+venv/
+ENV/
+env/
+
+# ROS / catkin
+build/
+devel/
+install/
+logs/
+*.bag
+*.bag.active
+.catkin_workspace
+catkin_make.cache
+
+# 本地数据与生成文件
+data/
+*.log
+/tmp/
+*.tar.gz
+!doc/**/*.tar.gz
+
+# 标定/拍照输出（保留配置 yaml，忽略本地结果）
+calibrationdata.tar.gz
+pose_adapter_images/
+
+# 模型与权重（按需取消注释）
+# *.pt
+# *.onnx
+# weights/
+
 # IDE
 .idea/
 .vscode/
@@ -5,34 +54,13 @@
 *.swo
 *~
 
-# Python
-__pycache__/
-*.py[cod]
-*$py.class
-*.so
-.Python
-venv/
-.venv/
-*.egg-info/
-.eggs/
-dist/
-build/
-
-# Catkin / ROS
-devel/
-install/
-build/
-logs/
-*.pid
-
-# PoseAdapter 运行时
-data/
-*.log
-pose_adapter.pid
-
 # 系统
 .DS_Store
 Thumbs.db
+Desktop.ini
 
-# 大模型文件（可选：若 models/*.pt 需版本控制可删此行）
-# models/*.pt
+# 环境与密钥（勿提交）
+.env
+.env.*
+*.pem
+secrets.yaml

@@ -20,9 +20,12 @@ if ! command -v ros2 &> /dev/null; then
     exit 1
 fi
 
-if ! dpkg -l | grep -q ros2-humble-camera-calibration; then
-    echo "正在安装相机标定依赖..."
-    sudo apt update && sudo apt install -y ros2-humble-camera-calibration
+# ROS2 版本（优先用环境变量，默认 foxy）
+ROS_DISTRO="${ROS_DISTRO:-foxy}"
+CALIB_PKG="ros-${ROS_DISTRO}-camera-calibration"
+if ! dpkg -l | grep -q "$CALIB_PKG"; then
+    echo "正在安装相机标定依赖: $CALIB_PKG"
+    sudo apt update && sudo apt install -y "$CALIB_PKG"
 fi
 
 # 启动标定工具
