@@ -1,0 +1,38 @@
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+venv/
+.venv/
+*.egg-info/
+.eggs/
+dist/
+build/
+
+# Catkin / ROS
+devel/
+install/
+build/
+logs/
+*.pid
+
+# PoseAdapter 运行时
+data/
+*.log
+pose_adapter.pid
+
+# 系统
+.DS_Store
+Thumbs.db
+
+# 大模型文件（可选：若 models/*.pt 需版本控制可删此行）
+# models/*.pt
