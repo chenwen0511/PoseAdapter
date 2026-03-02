@@ -166,7 +166,7 @@ roslaunch pose_adapter pose_adapter.launch calib_file:=/home/unitree/calibration
 
 ## 四、关于 Go2 官方默认内参
 
-宇树官网与文档中心**未公开** Go2 的默认相机内参与畸变系数。需准确参数时，请使用本项目标定流程在真机上标定，或向宇树技术支持/售后索取。
+宇树官网与文档中心**未公开** Go2 的默认相机内参与畸变系数。需准确参数时，请使用本项目标定流程在真机上标定，或向宇树技术支持/售后索取。标定与 pose_adapter 均使用话题 **`/camera/image_raw`**，需有节点向该话题发布相机 raw 图。
 
 ---
 

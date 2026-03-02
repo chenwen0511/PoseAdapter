@@ -11,8 +11,8 @@ WORK_DIR="$(pwd)"
 PID_FILE="$WORK_DIR/pose_adapter.pid"
 LOG_FILE="$WORK_DIR/data/logs/pose_adapter.log"
 
-# Conda 环境（可选，用于 unitree_sdk2py 等依赖）
-CONDA_ENV="${CONDA_ENV:-}"
+# Conda 环境（unitree_sdk2py 在 task 中，可覆盖）
+CONDA_ENV="${CONDA_ENV:-task}"
 
 # 标定文件（仅当设置 CALIB_FILE 时覆盖 launch 默认值）
 
@@ -27,7 +27,11 @@ _init_conda() {
             source "/opt/conda/etc/profile.d/conda.sh"
         fi
         if command -v conda &> /dev/null; then
-            conda activate "$CONDA_ENV" 2>/dev/null || echo "⚠️  无法激活 conda 环境 '$CONDA_ENV'"
+            if conda activate "$CONDA_ENV" 2>/dev/null; then
+                echo "📦 使用 Conda 环境: $CONDA_ENV"
+            else
+                echo "⚠️  无法激活 conda 环境 '$CONDA_ENV'"
+            fi
         fi
     fi
 }
@@ -84,14 +88,32 @@ _start() {
     fi
 
     # 构建 roslaunch 参数
-    LAUNCH_ARGS=""
+    # 注意：start.sh 为后台模式，强制关闭 image_view，因 nohup 子进程无法可靠获取 X 显示
+    LAUNCH_ARGS="show_debug_image:=false"
     if [ -n "${CALIB_FILE:-}" ] && [ -f "$CALIB_FILE" ]; then
-        LAUNCH_ARGS="calib_file:=$CALIB_FILE"
+        LAUNCH_ARGS="$LAUNCH_ARGS calib_file:=$CALIB_FILE"
         echo "📷 使用标定文件: $CALIB_FILE"
+    fi
+    if [ -n "${NETWORK_INTERFACE:-}" ]; then
+        LAUNCH_ARGS="$LAUNCH_ARGS network_interface:=$NETWORK_INTERFACE"
+        echo "🔌 网络接口: $NETWORK_INTERFACE"
+    fi
+    if [ -n "${LOOP_HZ:-}" ]; then
+        LAUNCH_ARGS="$LAUNCH_ARGS loop_hz:=$LOOP_HZ"
+        echo "⏱️  主循环: $LOOP_HZ Hz"
     fi
 
     cd "$WORK_DIR"
-    nohup roslaunch pose_adapter pose_adapter.launch $LAUNCH_ARGS >> "$LOG_FILE" 2>&1 &
+    # 每次启动覆盖日志，便于查看当前运行输出
+    {
+        echo "===== PoseAdapter 启动于 $(date '+%Y-%m-%d %H:%M:%S') ====="
+        echo "参数: $LAUNCH_ARGS"
+        echo ""
+    } > "$LOG_FILE"
+    # 禁用 Python 输出缓冲，确保日志实时写入
+    export PYTHONUNBUFFERED=1
+    # 使用 stdbuf 强制行缓冲，避免输出被缓存
+    nohup stdbuf -oL -eL roslaunch pose_adapter pose_adapter.launch $LAUNCH_ARGS >> "$LOG_FILE" 2>&1 &
     PID=$!
     echo $PID > "$PID_FILE"
 
@@ -131,6 +153,8 @@ _stop() {
     else
         echo "⚠️  PoseAdapter 未运行"
     fi
+    # 清理可能残留的 pose_adapter_node 子进程（restart 时易产生僵尸进程）
+    pkill -9 -f "pose_adapter_node.py" 2>/dev/null && echo "🧹 已清理残留进程" || true
     return 0
 }
 
@@ -181,8 +205,13 @@ case "${1:-}" in
         echo "  status  - 查看运行状态"
         echo ""
         echo "环境变量:"
-        echo "  CALIB_FILE  - 相机标定 yaml 路径（如 /home/unitree/calibration_results/calib_result.yaml）"
-        echo "  CONDA_ENV   - Conda 环境名称（若使用）"
+        echo "  CALIB_FILE        - 相机标定 yaml 路径"
+        echo "  CONDA_ENV        - Conda 环境名称，默认 task（含 unitree_sdk2py）"
+        echo "  NETWORK_INTERFACE - Unitree SDK 网卡（如 eth1），留空自动检测"
+        echo "  LOOP_HZ          - 主循环频率（默认 5），低算力可设 3"
+        echo ""
+        echo "说明: start.sh 为后台模式，不启动 image_view。如需看调试图像，请在前台运行:"
+        echo "  roslaunch pose_adapter pose_adapter.launch show_debug_image:=true"
         exit 1
         ;;
 esac

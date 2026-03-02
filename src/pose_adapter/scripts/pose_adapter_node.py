@@ -54,16 +54,21 @@ class PoseAdapterNode:
 
         # 相机
         self.camera_handler = None
-        
+        self.latest_ros_image = None  # ROS 话题回退用的最新帧
+
         # 状态
         self.current_detections = []
         self.current_tracks = []
         self.target_track_id = None
         self.is_running = True
         self.ocr_result = None
+        self._frame_count = 0  # 用于节流调试图像
         
-        # 使用 Unitree SDK 初始化相机
-        self._init_camera()
+        # 使用 Unitree SDK2 VideoClient 初始化 Go2 前置相机
+        if self.use_go2_camera:
+            self._init_camera()
+        else:
+            rospy.loginfo("已禁用 Go2 相机，仅使用 camera_image_topic")
 
         # ROS
         self._init_ros()
@@ -83,6 +88,9 @@ class PoseAdapterNode:
         # 控制参数
         self.target_distance = rospy.get_param('~target_distance', 1.7)
         self.target_ratio = rospy.get_param('~target_ratio', 0.65)
+
+        # 低功耗：主循环频率 Hz（默认 5，低算力设备建议 3-5，高算力可 10-20）
+        self.loop_hz = rospy.get_param('~loop_hz', 5)
         
         # 模型路径
         self.yolo_model_path = rospy.get_param('~yolo_model_path', None)
@@ -93,6 +101,12 @@ class PoseAdapterNode:
 
         # Go2 网络接口（用于 Unitree SDK）
         self.network_interface = rospy.get_param('~network_interface', '')
+
+        # 是否使用 Go2 相机 SDK 取流（默认 False，从 camera_image_topic 取图）
+        self.use_go2_camera = rospy.get_param('~use_go2_camera', False)
+
+        # 图像话题（与 calibrate 一致默认 /camera/image_raw；由其他节点发布相机 raw）
+        self.camera_image_topic = rospy.get_param('~camera_image_topic', '/camera/image_raw')
 
         # 本地图片保存路径（拍照/调试）
         self.image_save_path = rospy.get_param('~image_save_path', '/tmp/pose_adapter_images')
@@ -144,11 +158,21 @@ class PoseAdapterNode:
         # 发布
         self.cmd_vel_pub = rospy.Publisher('/cmd_vel', Twist, queue_size=10)
         self.debug_image_pub = rospy.Publisher('/pose_adapter/debug_image', Image, queue_size=1)
-        
-        # 定时器
-        self.control_timer = rospy.Timer(rospy.Duration(0.05), self._control_loop)  # 20Hz
-        # 图像处理循环（从 Go2 相机获取图像）
-        self.image_timer = rospy.Timer(rospy.Duration(0.05), self._image_loop)  # 20Hz
+
+        # 订阅图像话题：默认从 /camera/image_raw 取帧（与 calibrate 一致，需其他节点发布）
+        if self.camera_image_topic:
+            self.image_sub = rospy.Subscriber(
+                self.camera_image_topic, Image, self._ros_image_callback, queue_size=1
+            )
+            rospy.loginfo(f"图像来源: {self.camera_image_topic}")
+        else:
+            self.image_sub = None
+
+        # 定时器（低算力设备降低 loop_hz 以节省 CPU）
+        period = 1.0 / max(1, min(30, self.loop_hz))
+        self.control_timer = rospy.Timer(rospy.Duration(period), self._control_loop)
+        self.image_timer = rospy.Timer(rospy.Duration(period), self._image_loop)
+        rospy.loginfo(f"主循环频率: {self.loop_hz} Hz")
 
     def _init_modules(self):
         """初始化各模块（需要相机参数）"""
@@ -167,7 +191,7 @@ class PoseAdapterNode:
             self.dist_coeffs = np.array([0.1, -0.2, 0, 0, 0.05], dtype=np.float64)
             self.image_shape = (self.camera_height, self.camera_width)
         
-        # 初始化模块
+        # 初始化模块（OCR 延迟至首次触发时加载，避免 PaddleOCR 导致段错误）
         self.detector = MeterDetector(model_path=self.yolo_model_path)
         self.tracker = DeepSORTTracker()
         self.pose_solver = PoseSolver(
@@ -176,20 +200,34 @@ class PoseAdapterNode:
             (self.meter_width, self.meter_height)
         )
         self.controller = MotionController(target_distance=self.target_distance)
-        self.ocr = MeterOCR(use_paddle=self.use_paddle_ocr)
+        self.ocr = None  # 延迟初始化
         
         rospy.loginfo("所有模块初始化完成")
 
+    def _ros_image_callback(self, msg):
+        """ROS 图像话题回调，保存最新帧供 _image_loop 使用"""
+        try:
+            cv_image = self.bridge.imgmsg_to_cv2(msg, desired_encoding='bgr8')
+            self.latest_ros_image = cv_image
+        except Exception as e:
+            rospy.logerr_throttle(5, f"ROS 图像转换失败: {e}")
+
     def _image_loop(self, event):
-        """图像循环：从 Go2 相机获取图像并进行检测/追踪"""
-        if not self.camera_handler or not self.camera_handler.is_available():
-            return
+        """图像循环：从 ROS 话题 /camera/image_raw 或 Go2 SDK 获取图像并进行检测/追踪"""
+        cv_image = None
 
-        frame = self.camera_handler.get_image_frame()
-        if frame is None:
-            return
+        # 优先从话题取帧（默认，与 calibrate 一致）
+        if self.camera_image_topic and self.latest_ros_image is not None:
+            cv_image = self.latest_ros_image.copy()
 
-        cv_image = frame
+        # 可选：使用 Go2 SDK 取流（use_go2_camera=true 时）
+        if cv_image is None and self.camera_handler and self.camera_handler.is_available():
+            frame = self.camera_handler.get_image_frame()
+            if frame is not None:
+                cv_image = frame
+
+        if cv_image is None:
+            return
 
         self.image_shape = cv_image.shape[:2]
         
@@ -212,8 +250,10 @@ class PoseAdapterNode:
         else:
             self.current_tracks = []
         
-        # 发布调试图像
-        self._publish_debug_image(cv_image)
+        # 发布调试图像（每 2 帧发布一次以降低 CPU）
+        self._frame_count += 1
+        if self._frame_count % 2 == 0:
+            self._publish_debug_image(cv_image)
     
     def _select_target(self, tracks):
         """选择追踪目标"""
@@ -277,10 +317,10 @@ class PoseAdapterNode:
         """触发 OCR"""
         if self.ocr_result is not None:
             return
-        
-        # 这里需要获取当前图像，简化处理
+
+        if self.ocr is None:
+            self.ocr = MeterOCR(use_paddle=self.use_paddle_ocr)
         rospy.loginfo("触发 OCR 识别...")
-        # OCR 逻辑在图像回调中处理
     
     def _publish_debug_image(self, cv_image):
         """发布调试图像"""

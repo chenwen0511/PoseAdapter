@@ -32,10 +32,10 @@ class MeterDetector:
         self.model = None
         self.use_yolo = False
         
-        if model_path:
+        if model_path and str(model_path).strip():
             try:
                 from ultralytics import YOLO
-                self.model = YOLO(model_path)
+                self.model = YOLO(str(model_path).strip())
                 self.use_yolo = True
                 rospy.loginfo(f"YOLOv8 模型加载成功: {model_path}")
             except ImportError:
@@ -93,11 +93,22 @@ class MeterDetector:
         """
         备用检测方案 - 基于轮廓的矩形检测
         用于测试阶段，实际部署应使用 YOLOv8
+        大图先降采样至 640 宽以节省 CPU
         """
         detections = []
-        
+        h, w = cv_image.shape[:2]
+        scale = 1.0
+        work_img = cv_image
+
+        # 低算力优化：宽>640 时降采样
+        if w > 640:
+            scale = 640.0 / w
+            nw, nh = 640, int(h * scale)
+            work_img = cv2.resize(cv_image, (nw, nh), interpolation=cv2.INTER_LINEAR)
+            h, w = nh, nw
+
         # 转为灰度
-        gray = cv2.cvtColor(cv_image, cv2.COLOR_BGR2GRAY)
+        gray = cv2.cvtColor(work_img, cv2.COLOR_BGR2GRAY)
         
         # 自适应阈值
         binary = cv2.adaptiveThreshold(gray, 255, cv2.ADAPTIVE_THRESH_GAUSSIAN_C, 
@@ -110,7 +121,6 @@ class MeterDetector:
         # 查找轮廓
         contours, _ = cv2.findContours(binary, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
         
-        h, w = cv_image.shape[:2]
         min_area = (w * h) * 0.05  # 至少占画面 5%
         max_area = (w * h) * 0.8   # 最多占画面 80%
         
@@ -123,6 +133,10 @@ class MeterDetector:
                 # 电表通常是竖直矩形，宽高比在 0.5-2 之间
                 if 0.5 < aspect_ratio < 2.0:
                     conf = min(0.9, area / (w * h * 0.5))  # 简单的置信度估计
+                    # 若降采样过，坐标需缩放回原图
+                    if scale < 1.0:
+                        inv = 1.0 / scale
+                        x, y, bw, bh = int(x*inv), int(y*inv), int(bw*inv), int(bh*inv)
                     detections.append((x, y, x+bw, y+bh, conf, 0))
         
         # 按置信度排序

@@ -5,8 +5,11 @@
   <arg name="camera_width" default="1280"/>
   <arg name="camera_height" default="720"/>
 
-  <!-- Go2 网络接口（Unitree SDK 使用的网卡，例如 eth0） -->
-  <arg name="network_interface" default="eth0"/>
+  <!-- 是否使用 Go2 相机 SDK 取流（默认 false，从 camera_image_topic 取图，与 calibrate 一致） -->
+  <arg name="use_go2_camera" default="false"/>
+
+  <!-- Go2 网络接口：留空则自动检测；eth0 不可用时可用 eth1 -->
+  <arg name="network_interface" default="eth1"/>
   
   <!-- 电表尺寸（米） -->
   <arg name="meter_width" default="0.1"/>
@@ -15,10 +18,17 @@
   <!-- 控制参数 -->
   <arg name="target_distance" default="1"/>
   <arg name="target_ratio" default="0.5"/>
+
+  <!-- 低算力：主循环 Hz，默认 5 以降低 CPU（高算力可设 10-20） -->
+  <arg name="loop_hz" default="5"/>
   
-  <!-- 模型路径 -->
-  <arg name="yolo_model_path" default="models/yolov8n.pt"/>
-  <arg name="use_paddle_ocr" default="true"/>
+  <!-- 模型路径：留空使用备用检测（无 PyTorch）；指定路径则用 YOLOv8 -->
+  <arg name="yolo_model_path" default=""/>
+  <!-- 低算力设备建议 false，PaddleOCR 易引起段错误 -->
+  <arg name="use_paddle_ocr" default="false"/>
+
+  <!-- 图像来源：与 calibrate 一致，默认 /camera/image_raw（由其他节点发布相机 raw 图） -->
+  <arg name="camera_image_topic" default="/camera/image_raw"/>
   
   <!-- 标定文件（留空则使用节点内默认内参） -->
   <arg name="calib_file" default="$(find pose_adapter)/config/default_camera_calib.yaml"/>
@@ -34,11 +44,14 @@
     <param name="yolo_model_path" value="$(arg yolo_model_path)"/>
     <param name="use_paddle_ocr" value="$(arg use_paddle_ocr)"/>
     <param name="calib_file" value="$(arg calib_file)"/>
+    <param name="use_go2_camera" value="$(arg use_go2_camera)"/>
     <param name="network_interface" value="$(arg network_interface)"/>
+    <param name="camera_image_topic" value="$(arg camera_image_topic)"/>
+    <param name="loop_hz" value="$(arg loop_hz)"/>
   </node>
   
-  <!-- 图像查看（可选） -->
-  <arg name="show_debug_image" default="true"/>
+  <!-- 图像查看（可选，无显示器时需设为 false） -->
+  <arg name="show_debug_image" default="false"/>
   <group if="$(arg show_debug_image)">
     <node name="image_view" pkg="image_view" type="image_view" output="screen">
       <remap from="image" to="/pose_adapter/debug_image"/>

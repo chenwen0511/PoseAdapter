@@ -76,28 +76,34 @@ class CameraHandler:
         if not UNITREE_VIDEO_AVAILABLE or VideoClient is None:
             self.logger.warning("⚠️ Unitree Video SDK不可用，相机功能将被禁用")
             return
-        
-        try:
-            # 初始化DDS通道（如果还未初始化）
-            # 注意：这里假设ChannelFactoryInitialize已经在RobotControl中初始化过了
-            # 如果还没有，我们需要初始化
+
+        # 尝试初始化 DDS：先用户指定接口，失败则自动检测
+        interfaces_to_try = []
+        if self.network_interface:
+            interfaces_to_try.append((self.network_interface, f"指定接口 {self.network_interface}"))
+        interfaces_to_try.append((None, "自动检测"))
+
+        for iface, desc in interfaces_to_try:
             try:
-                # 尝试初始化（如果已经初始化过，这个操作是幂等的）
-                if self.network_interface:
-                    ChannelFactoryInitialize(0, self.network_interface)
-                    self.logger.debug(f"DDS初始化（相机） - 网络接口: {self.network_interface}")
+                if iface:
+                    ChannelFactoryInitialize(0, iface)
+                    self.logger.info(f"DDS 初始化 - {desc}")
                 else:
                     ChannelFactoryInitialize(0)
-                    self.logger.debug("DDS初始化（相机） - 自动检测网络接口")
+                    self.logger.info(f"DDS 初始化 - {desc}")
+                break
             except Exception as e:
-                self.logger.debug(f"DDS可能已初始化: {e}")
-            
-            # 创建VideoClient
+                err_str = str(e)
+                if "does not match an available interface" in err_str or "create domain error" in err_str:
+                    self.logger.warning(f"接口 {iface or 'auto'} 不可用: {err_str}")
+                    continue
+                raise
+
+        try:
             self.video_client = VideoClient()
-            # 设置较短的超时时间，以提高获取帧的速度（30fps时每帧约33ms）
-            self.video_client.SetTimeout(0.1)  # 100ms超时，足够获取一帧
+            self.video_client.SetTimeout(0.1)
             self.video_client.Init()
-            self.logger.info("✅ Go2前置相机初始化成功（使用Unitree SDK）")
+            self.logger.info("✅ Go2 前置相机初始化成功（Unitree SDK）")
         except Exception as e:
             self.logger.error(f"❌ 相机初始化失败: {e}", exc_info=True)
             self.video_client = None
