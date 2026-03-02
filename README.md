@@ -9,6 +9,7 @@
 ```
 PoseAdapter/
 ├── README.md           # 本文件，项目与目录说明
+├── start.sh            # 启动脚本（start/stop/restart/status）
 ├── doc/                # 方案与使用文档（与 src 模块对应）
 │   ├── adapter_README.md   # 电表巡检方案：检测 / 追踪 / 位姿 / 控制 / OCR
 │   └── calibrate_README.md  # 相机内参标定说明与经验参数
@@ -40,6 +41,7 @@ PoseAdapter/
 | 目的 | 入口 |
 |------|------|
 | 了解电表巡检方案与可行性 | [doc/adapter_README.md](doc/adapter_README.md) |
+| 启动 Adapter 节点 | `./start.sh start` 或 [doc/adapter_README.md#启动-adapter-节点](doc/adapter_README.md#启动-adapter-节点) |
 | 做相机内参标定、查经验内参 | [doc/calibrate_README.md](doc/calibrate_README.md) |
 | 运行标定脚本、读取标定结果 | `src/calibrate/` |
 | 运行单元测试 | `pytest tests/ -v`（见 [tests/README.md](tests/README.md)） |

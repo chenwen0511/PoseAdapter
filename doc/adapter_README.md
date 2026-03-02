@@ -78,6 +78,66 @@ if abs(yaw) > 2:
 
 ---
 
+## 启动 Adapter 节点
+
+Adapter 节点位于 **`src/pose_adapter/`**，基于 **ROS1**。
+
+### 方式一：使用启动脚本（推荐）
+
+项目根目录提供 **`start.sh`**，支持 start/stop/restart/status：
+
+```bash
+cd /path/to/PoseAdapter
+chmod +x start.sh
+
+# 启动（使用默认标定）
+./start.sh start
+
+# 使用自定义标定文件
+CALIB_FILE=/home/unitree/calibration_results/calib_result.yaml ./start.sh start
+
+# 停止 / 重启 / 查看状态
+./start.sh stop
+./start.sh restart
+./start.sh status
+```
+
+### 方式二：手动 roslaunch
+
+启动前请确保工作空间已构建、依赖已安装：
+
+```bash
+cd /path/to/PoseAdapter
+source /opt/ros/noetic/setup.bash   # 或 melodic
+source devel/setup.bash
+
+# 基础启动
+roslaunch pose_adapter pose_adapter.launch
+
+# 带参数启动（标定完成后推荐）
+roslaunch pose_adapter pose_adapter.launch \
+  calib_file:=/home/unitree/calibration_results/calib_result.yaml \
+  meter_width:=0.1 meter_height:=0.15 target_distance:=1.5
+```
+
+**依赖安装**：`sudo apt install ros-$ROS_DISTRO-cv-bridge ros-$ROS_DISTRO-image-transport`
+
+### 主要 launch 参数
+
+| 参数 | 默认值 | 说明 |
+|------|--------|------|
+| `calib_file` | 空 | 相机标定 yaml 路径（完成标定后务必指定） |
+| `meter_width` | 0.1 | 电表宽度（米） |
+| `meter_height` | 0.15 | 电表高度（米） |
+| `target_distance` | 1 | 目标距离（米） |
+| `target_ratio` | 0.5 | 目标画面占比 |
+| `camera_width` | 1280 | 相机分辨率宽 |
+| `camera_height` | 720 | 相机分辨率高 |
+| `yolo_model_path` | 空 | YOLO 模型路径（若未配置则用占位） |
+| `show_debug_image` | true | 是否启动 image_view 显示调试图像 |
+
+---
+
 ## 常见问题与对策
 
 - **遮挡/丢失**：启用**重检测机制**，丢失后快速重新识别。
@@ -124,14 +184,14 @@ if abs(yaw) > 2:
 | 电表尺寸未知或型号混杂 | 配置表按型号维护尺寸；或首次巡检测量录入，后续复用。 |
 | bbox 四角代替角点导致 PnP 误差大 | 先用 bbox 四角跑通流程，再迭代为角点检测或关键点模型提升精度。 |
 | 多块电表同屏 | 策略选一（如距离最近/最居中）再对该目标做闭环控制与 OCR。 |
-| 控制振荡或响应慢 | 距离/偏航做死区与限幅，角速度增益调参；位姿多帧平滑（如 3–5 帧）。 |
-| 光照导致 OCR 失败 | 已列 CLAHE/红外补光；可加「不合格不保存、重拍」逻辑。 |
+| 控制振荡或响应慢 | 距离/偏航做死区与限幅，角速度增益调参；位姿多帧平滑（见常见问题）。 |
+| 光照导致 OCR 失败 | 见常见问题「光照不均」；可加「不合格不保存、重拍」逻辑。 |
 
-### 效果预期的适用条件
+### 效果预期（适用条件）
 
 - **响应时间 <200 ms**：在 30 FPS、控制律调好、无严重丢帧前提下可达。  
-- **距离误差 <5 cm、角度 <1°**：依赖**内参标定良好 + 电表尺寸准确 + 2D 点稳定**，若用 bbox 四角则适当放宽预期。  
-- **读数成功率 >95%**：在正常光照、对焦清晰、表盘类型在 OCR 训练范围内成立。
+- **定位精度**：距离误差 <5 cm、角度 <1°，依赖内参标定良好 + 电表尺寸准确 + 2D 点稳定；若用 bbox 四角则适当放宽。  
+- **读数成功率 >95%**：正常光照、对焦清晰、表盘类型在 OCR 训练范围内成立。
 
 ### 建议开发顺序
 
@@ -142,10 +202,3 @@ if abs(yaw) > 2:
 5. **控制闭环**：按距离/偏航与目标占比、中心偏差生成 cmd_vel，调参并加死区/限幅。  
 6. **OCR 与触发**：达标后截 ROI 调用 PaddleOCR，记录读数与置信度。
 
----
-
-## 效果预期
-
-- **响应时间**：<200 ms，快速调节到位。
-- **定位精度**：距离误差 <5 cm，角度误差 <1°（依赖标定与电表尺寸）。
-- **读数成功率**：正常光照下 >95%。
