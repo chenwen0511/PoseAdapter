@@ -210,11 +210,7 @@ class PoseAdapterNode:
             cv_image = self.bridge.imgmsg_to_cv2(msg, desired_encoding='bgr8')
             self.latest_ros_image = cv_image
         except Exception as e:
-            err = str(e)
-            if "ffi_type_pointer" in err or "libp11-kit" in err:
-                rospy.logerr_throttle(30, "ROS 图像转换失败 (libffi 冲突)。start.sh 已尝试用系统库路径；若仍报错可尝试不启用 conda 启动 adapter。")
-            else:
-                rospy.logerr_throttle(5, f"ROS 图像转换失败: {err}")
+            rospy.logerr_throttle(5, f"ROS 图像转换失败: {e}")
 
     def _image_loop(self, event):
         """图像循环：从 ROS 话题 /camera/image_raw 或 Go2 SDK 获取图像并进行检测/追踪"""
@@ -231,7 +227,6 @@ class PoseAdapterNode:
                 cv_image = frame
 
         if cv_image is None:
-            rospy.logwarn_throttle(10, "未收到图像：请确认有节点在发布 %s（adapter 为 ROS1，需 ROS1 话题或桥接）" % (self.camera_image_topic or "camera_image_topic"))
             return
 
         self.image_shape = cv_image.shape[:2]
@@ -242,11 +237,31 @@ class PoseAdapterNode:
         
         # 1. 检测
         detections = self.detector.detect(cv_image)
-        self.current_detections = detections
+
+        # 过滤异常尺寸的检测框（例如几乎占满整幅图像的 bbox）
+        h, w = self.image_shape
+        valid_detections = []
+        for det in detections:
+            x1, y1, x2, y2, conf, cls = det
+            bw = max(0, x2 - x1)
+            bh = max(0, y2 - y1)
+            if bw == 0 or bh == 0:
+                continue
+            area_ratio = float(bw * bh) / float(w * h)
+            if area_ratio >= 0.9:
+                rospy.logwarn_throttle(
+                    2.0,
+                    f"检测框过大(占比 {area_ratio:.2f})，丢弃该结果: "
+                    f"bbox=({x1}, {y1}, {x2}, {y2})"
+                )
+                continue
+            valid_detections.append(det)
+
+        self.current_detections = valid_detections
         
         # 2. 追踪
-        if detections:
-            tracks = self.tracker.update(detections)
+        if valid_detections:
+            tracks = self.tracker.update(valid_detections)
             self.current_tracks = tracks
             
             # 选择目标（最近/最居中）
@@ -302,6 +317,23 @@ class PoseAdapterNode:
             return
         
         _, bbox, conf = target_track
+
+        # 若当前 bbox 明显异常（几乎占满整幅图像），则跳过控制，避免 PnP 得到不合理位姿
+        h, w = self.image_shape if self.image_shape is not None else (0, 0)
+        if h > 0 and w > 0:
+            x1, y1, x2, y2 = bbox
+            bw = max(0, x2 - x1)
+            bh = max(0, y2 - y1)
+            if bw > 0 and bh > 0:
+                area_ratio = float(bw * bh) / float(w * h)
+                if area_ratio >= 0.9:
+                    rospy.logwarn_throttle(
+                        2.0,
+                        f"目标框占比过大(占比 {area_ratio:.2f})，跳过本次控制: "
+                        f"bbox=({x1}, {y1}, {x2}, {y2})"
+                    )
+                    self.controller.stop()
+                    return
         
         # 位姿解算
         pose = self.pose_solver.solve(bbox, self.image_shape)
@@ -344,6 +376,32 @@ class PoseAdapterNode:
             cv2.rectangle(debug_image, (x1, y1), (x2, y2), color, 2)
             cv2.putText(debug_image, f"ID:{track_id}", (x1, y1-10),
                        cv2.FONT_HERSHEY_SIMPLEX, 0.6, color, 2)
+        
+        # 若已选中目标，在 debug 图中高亮 PnP 使用的四个角点，便于核对电表读数区域
+        if self.target_track_id is not None:
+            for track_id, bbox, conf in self.current_tracks:
+                if track_id == self.target_track_id:
+                    x1, y1, x2, y2 = bbox
+                    # 顺序与 PoseSolver 中的 image_points 保持一致：
+                    # 左下、右下、右上、左上
+                    corners = [
+                        (x1, y2),
+                        (x2, y2),
+                        (x2, y1),
+                        (x1, y1),
+                    ]
+                    for idx, (cx, cy) in enumerate(corners):
+                        cv2.circle(debug_image, (int(cx), int(cy)), 5, (0, 255, 255), -1)
+                        cv2.putText(
+                            debug_image,
+                            str(idx),
+                            (int(cx) + 3, int(cy) - 3),
+                            cv2.FONT_HERSHEY_SIMPLEX,
+                            0.5,
+                            (0, 255, 255),
+                            1,
+                        )
+                    break
         
         # 绘制状态信息
         status_text = f"Tracks: {len(self.current_tracks)}"

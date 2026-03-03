@@ -1,4 +1,3 @@
-<<<<<<< HEAD
 # PoseAdapter
 
 宇树 Go2 机器狗巡检场景下，基于**前置相机 + 机身运动**的位姿自适应与电表读数采集方案（检测 + 追踪 + PnP 位姿 + 控制闭环 + OCR）。
@@ -91,9 +90,27 @@ PoseAdapter/
 | 目的 | 入口 |
 |------|------|
 | 了解电表巡检方案与可行性 | [doc/adapter_README.md](doc/adapter_README.md) |
-| 构建 pose_adapter 包 | `catkin_make`（见 [doc/adapter_README.md#构建-pose_adapter-包](doc/adapter_README.md#构建-pose_adapter-包)） |
+| 构建 / 重新构建 pose_adapter 包 | 见下方“使用 catkin_make 重新构建”或 [doc/adapter_README.md#构建-pose_adapter-包](doc/adapter_README.md#构建-pose_adapter-包) |
 | 启动 Adapter 节点 | `./start.sh start` 或 [doc/adapter_README.md#启动-adapter-节点](doc/adapter_README.md#启动-adapter-节点) |
 | 做相机内参标定、查经验内参 | [doc/calibrate_README.md](doc/calibrate_README.md) |
 | 运行标定脚本、读取标定结果 | `src/calibrate/` |
 | 运行单元测试 | `pytest tests/ -v`（见 [tests/README.md](tests/README.md)） |
->>>>>>> a5a410c (add default camera calib yaml)
+
+---
+
+## 使用 catkin_make 重新构建
+
+每次修改 `src/pose_adapter/` 下的 Python 节点或依赖后，建议在项目根目录重新构建一次工作空间，确保 `devel/setup.bash` 中的环境与最新代码一致：
+
+```bash
+cd ~/stephen/PoseAdapter       # 或你的实际工作空间路径
+source /opt/ros/noetic/setup.bash
+catkin_make
+```
+
+构建成功后，重新加载工作空间环境再启动：
+
+```bash
+source devel/setup.bash
+./start.sh restart     # 或 ./start.sh start
+```

@@ -141,6 +141,29 @@ roslaunch pose_adapter pose_adapter.launch calib_file:=/path/to/calib_result.yam
 
 pose_adapter **默认从话题 `/camera/image_raw` 获取图像**，与 `src/calibrate` 标定脚本约定一致。需有其他节点向该话题发布相机 raw 图。
 
+### 调试图像与位姿日志
+
+- **调试图像话题**：`/pose_adapter/debug_image`，类型为 `sensor_msgs/Image`。  
+  - 绿色框：当前检测到的电表检测框（带置信度）。  
+  - 蓝/红框：追踪到的目标（红色为当前选中目标 `target_track_id`）。  
+  - 左上角白字：`Tracks: N | Target: id`。  
+  - 对于当前目标，会额外绘制 4 个黄色小圆点并标号 0~3，对应 PnP 使用的四个角点（顺序：左下、右下、右上、左上）。  
+  - 查看方式示例：  
+    ```bash
+    rosrun image_view image_view image:=/pose_adapter/debug_image
+    ```
+
+- **PnP 位姿调试日志**：  
+  - 源码位于 `src/pose_adapter/src/pose_adapter/pose_solver.py` 的 `PoseSolver.solve()`。  
+  - 每秒输出一次节流日志，包含 bbox、2D 像素点 `image_pts`、距离 `distance`、姿态角 `yaw/pitch/roll` 以及 `tvec`：  
+    ```text
+    [PnP] bbox=(x1, y1, x2, y2), image_pts=[[...]], distance=1.700 m, yaw=5.00 deg, ...
+    ```  
+  - 查看方式示例（配合 `start.sh`）：  
+    ```bash
+    tail -f /home/unitree/stephen/PoseAdapter/data/logs/pose_adapter.log | grep PnP
+    ```
+
 ### 主要 launch 参数
 
 | 参数 | 默认值 | 说明 |

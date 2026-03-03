@@ -99,6 +99,27 @@ rostopic hz /camera/image_raw
 
 若有频率输出，说明相机正常发布。按 `Ctrl+C` 退出即可。
 
+若需要**直接查看相机画面**，可在任意已 source ROS1 的终端中运行：
+
+```bash
+rosrun image_view image_view image:=/camera/image_raw
+```
+
+若需要**查看当前图像分辨率**，可执行：
+
+```bash
+rostopic echo -n1 /camera/image_raw | egrep "width|height"
+```
+
+例如实测输出：
+
+```text
+height: 1080
+width: 1920
+```
+
+说明当前 Go2 相机发布为 **1920×1080（1080P）**。
+
 ---
 
 #### 终端 3：一键标定

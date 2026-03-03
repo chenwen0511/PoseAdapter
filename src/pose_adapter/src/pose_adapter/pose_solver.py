@@ -63,7 +63,7 @@ class PoseSolver:
         """
         x1, y1, x2, y2 = bbox
         
-        # 从 bbox 获取 2D 点（四角）
+        # 从 bbox 获取 2D 点（四角，顺序需与 object_points 一一对应）
         image_points = np.array([
             [x1, y2],   # 左下
             [x2, y2],   # 右下
@@ -100,6 +100,21 @@ class PoseSolver:
                 'tvec': tvec.flatten(),
                 'rvec': rvec.flatten()
             }
+            
+            # 调试日志（节流，避免刷屏）
+            rospy.loginfo_throttle(
+                1.0,
+                "[PnP] bbox=(%.1f, %.1f, %.1f, %.1f), "
+                "image_pts=%s, "
+                "distance=%.3f m, yaw=%.2f deg, pitch=%.2f deg, roll=%.2f deg, "
+                "tvec=%s" % (
+                    x1, y1, x2, y2,
+                    np.array2string(image_points, precision=1, suppress_small=True),
+                    distance,
+                    np.degrees(yaw), np.degrees(pitch), np.degrees(roll),
+                    np.array2string(tvec.flatten(), precision=3, suppress_small=True)
+                )
+            )
             
             # 平滑滤波
             smoothed_pose = self._smooth_pose(pose)
