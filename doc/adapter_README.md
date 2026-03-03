@@ -127,6 +127,9 @@ chmod +x start.sh
 ### 方式二：手动 roslaunch
 
 ```bash
+# use_go2_camera 时必设 Unitree SDK 依赖
+export CYCLONEDDS_HOME="${CYCLONEDDS_HOME:-/home/unitree/cyclonedds/install}"
+
 source /opt/ros/noetic/setup.bash
 source devel/setup.bash
 roslaunch pose_adapter pose_adapter.launch calib_file:=/path/to/calib_result.yaml
@@ -153,6 +156,7 @@ pose_adapter **默认从话题 `/camera/image_raw` 获取图像**，与 `src/cal
 
 ## 常见问题与对策
 
+- **ROS 图像转换失败：ffi_type_pointer / libp11-kit**：conda 与系统 libffi 冲突。`start.sh` 已自动用 `LD_PRELOAD` 加载系统 `libffi.so.7` 并优先系统库路径；若仍报错可尝试 `CONDA_ENV=` 不启用 conda 启动（仅当不依赖 conda 内 unitree_sdk2py 时）。
 - **遮挡/丢失**：启用**重检测机制**，丢失后快速重新识别。
 - **光照不均**：使用 **CLAHE** 增强，或切换**红外补光**。
 - **位姿抖动**：对位姿做**滑动平均滤波**（窗口 3–5 帧）。

@@ -68,46 +68,47 @@ sudo apt install -y ros-foxy-camera-calibration
 
 ---
 
-#### 终端 1：启动相机发布
+#### 终端 1：启动相机发布（ROS1，与 pose_adapter 同机无需桥接）
 
-在 Go2 上运行，将相机图像发布到 ROS2 话题：
+在 Go2 上运行，将相机图像发布到 **ROS1** 话题 `/camera/image_raw`，pose_adapter 可直接订阅：
 
 ```bash
-# 加载 ROS2
-source /opt/ros/foxy/setup.bash
+# Unitree SDK 依赖（路径可自定义）
+export CYCLONEDDS_HOME=/home/unitree/cyclonedds/install
 
-# 进入标定目录
+# 仅加载 ROS1（勿 source ROS2，避免 cyclonedds 冲突）
+source /opt/ros/noetic/setup.bash
+
+# 若用 conda 且 unitree_sdk2py 在 task：conda activate task
 cd ~/stephen/PoseAdapter/src/calibrate
-# 若项目在其他路径，改为你的实际路径
 
-# 启动相机发布（保持运行，不要关）
-python3.8 publish_go2_camera.py --no-network-interface
+# 启动相机发布（保持运行）
+python publish_go2_camera.py --no-network-interface
 ```
 
-看到 `Go2 相机初始化成功，开始发布: /camera/image_raw` 即成功。此终端保持运行，直到标定完成。
+看到 `Go2 相机初始化成功，开始发布: /camera/image_raw` 即成功。此终端保持运行。
 
 ---
 
 #### 终端 2：验证图像是否在发布（可选）
 
 ```bash
-source /opt/ros/foxy/setup.bash
-export ROS_DOMAIN_ID=1
-ros2 topic hz /camera/image_raw
+source /opt/ros/noetic/setup.bash
+rostopic hz /camera/image_raw
 ```
 
-若有频率输出（如 `average rate: 30.000`），说明相机正常发布。按 `Ctrl+C` 退出即可，此终端可关掉。
+若有频率输出，说明相机正常发布。按 `Ctrl+C` 退出即可。
 
 ---
 
 #### 终端 3：一键标定
 
-```bash
-# 进入标定目录
-cd ~/stephen/PoseAdapter/src/calibrate
-# 若项目在其他路径，改为你的实际路径
+**说明**：`calibrate_go2_onekey.sh` 当前依赖 **ROS2** 话题。若终端 1 使用本仓库的 **ROS1** 相机节点，一键标定需在标定机起 **ros1_bridge** 将 `/camera/image_raw` 桥到 ROS2，或改用带 GUI 的 `calibrate_go2_camera.sh`（同样需 ROS2 + bridge）。仅跑 pose_adapter 时无需标定脚本，ROS1 发布即可。
 
-# 执行一键标定
+```bash
+cd ~/stephen/PoseAdapter/src/calibrate
+
+# 执行一键标定（需 ROS2 环境能收到 /camera/image_raw，见上说明）
 ./calibrate_go2_onekey.sh
 ```
 
@@ -143,12 +144,14 @@ roslaunch pose_adapter pose_adapter.launch calib_file:=/home/unitree/calibration
 | 现象 | 处理 |
 |------|------|
 | `No module named 'rclpy._rclpy'` | 使用 `python3.8` 或 `/usr/bin/python3.8`，不要用 conda/venv 的 python3 |
+| 未安装 unitree_sdk2py | 在已安装 SDK 的 conda 环境中用 `python publish_go2_camera.py`，不要用系统 `python3.8`（`which python` 应指向 conda 环境） |
 | `No module named 'yaml'` | `pip3 install pyyaml` |
 | `No module named 'cv2'` | `pip3 install opencv-python` 或 `sudo apt install python3-opencv` |
 | `channel factory init error` / `eth0 does not match` | 使用 `--no-network-interface`，不要指定网卡 |
-| `rmw_create_node: failed to create domain` | 脚本会自动设置 `ROS_DOMAIN_ID=1`；标定时确保 `export ROS_DOMAIN_ID=1` |
-| `ros2 topic hz` 无输出 | 确认终端 1 在跑；标定脚本内已设 `ROS_DOMAIN_ID=1`，与相机节点一致 |
+| `rmw_create_node: failed to create domain` | 本脚本已改为 ROS1，不再使用 ROS_DOMAIN_ID；若用其他 ROS2 节点可设 `export ROS_DOMAIN_ID=1` |
+| `rostopic hz` 无输出 | 确认终端 1 相机节点在跑；本机需已 source noetic |
 | 一直「等待图像…」或「已发布 0 帧」 | 相机/SDK 未返回图，检查 Go2 是否开机、网络、宇树 SDK 是否正常 |
+| Unitree SDK 无法初始化 / channel 报错 | 设置 `export CYCLONEDDS_HOME=/home/unitree/cyclonedds/install`（路径按实际安装调整） |
 | `Corrupt JPEG data` | 正常，已抑制该警告；若持续有「已发布 xxx 帧」则标定可进行 |
 
 ---

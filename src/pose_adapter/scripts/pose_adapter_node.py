@@ -210,7 +210,11 @@ class PoseAdapterNode:
             cv_image = self.bridge.imgmsg_to_cv2(msg, desired_encoding='bgr8')
             self.latest_ros_image = cv_image
         except Exception as e:
-            rospy.logerr_throttle(5, f"ROS 图像转换失败: {e}")
+            err = str(e)
+            if "ffi_type_pointer" in err or "libp11-kit" in err:
+                rospy.logerr_throttle(30, "ROS 图像转换失败 (libffi 冲突)。start.sh 已尝试用系统库路径；若仍报错可尝试不启用 conda 启动 adapter。")
+            else:
+                rospy.logerr_throttle(5, f"ROS 图像转换失败: {err}")
 
     def _image_loop(self, event):
         """图像循环：从 ROS 话题 /camera/image_raw 或 Go2 SDK 获取图像并进行检测/追踪"""
@@ -227,6 +231,7 @@ class PoseAdapterNode:
                 cv_image = frame
 
         if cv_image is None:
+            rospy.logwarn_throttle(10, "未收到图像：请确认有节点在发布 %s（adapter 为 ROS1，需 ROS1 话题或桥接）" % (self.camera_image_topic or "camera_image_topic"))
             return
 
         self.image_shape = cv_image.shape[:2]

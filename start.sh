@@ -14,6 +14,9 @@ LOG_FILE="$WORK_DIR/data/logs/pose_adapter.log"
 # Conda 环境（unitree_sdk2py 在 task 中，可覆盖）
 CONDA_ENV="${CONDA_ENV:-task}"
 
+# Unitree SDK 依赖的 CycloneDDS 路径（涉及 use_go2_camera 等 SDK 调用时必设，可覆盖）
+export CYCLONEDDS_HOME="${CYCLONEDDS_HOME:-/home/unitree/cyclonedds/install}"
+
 # 标定文件（仅当设置 CALIB_FILE 时覆盖 launch 默认值）
 
 # 初始化 conda 环境
@@ -104,6 +107,16 @@ _start() {
     fi
 
     cd "$WORK_DIR"
+    # 使用 conda 时强制用系统 libffi，避免 cv_bridge 图像转换报错 ffi_type_pointer / libp11-kit
+    if [ -n "$CONDA_ENV" ]; then
+        SYS_FFI="/lib/$(uname -m)-linux-gnu/libffi.so.7"
+        [ -f "$SYS_FFI" ] || SYS_FFI="/usr/lib/$(uname -m)-linux-gnu/libffi.so.7"
+        if [ -f "$SYS_FFI" ]; then
+            export LD_PRELOAD="${LD_PRELOAD:+$LD_PRELOAD:}$SYS_FFI"
+        fi
+        SYS_LIB="/usr/lib/$(uname -m)-linux-gnu:/lib/$(uname -m)-linux-gnu"
+        export LD_LIBRARY_PATH="${SYS_LIB}:${LD_LIBRARY_PATH:-}"
+    fi
     # 每次启动覆盖日志，便于查看当前运行输出
     {
         echo "===== PoseAdapter 启动于 $(date '+%Y-%m-%d %H:%M:%S') ====="
@@ -207,6 +220,7 @@ case "${1:-}" in
         echo "环境变量:"
         echo "  CALIB_FILE        - 相机标定 yaml 路径"
         echo "  CONDA_ENV        - Conda 环境名称，默认 task（含 unitree_sdk2py）"
+        echo "  CYCLONEDDS_HOME  - Unitree SDK 依赖，默认 /home/unitree/cyclonedds/install"
         echo "  NETWORK_INTERFACE - Unitree SDK 网卡（如 eth1），留空自动检测"
         echo "  LOOP_HZ          - 主循环频率（默认 5），低算力可设 3"
         echo ""
