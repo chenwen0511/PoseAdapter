@@ -121,23 +121,26 @@ class MeterDetector:
         # 查找轮廓
         contours, _ = cv2.findContours(binary, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
         
-        min_area = (w * h) * 0.05  # 至少占画面 5%
+        # 电表在画面中的面积可以较小，这里放宽下限到 1%
+        min_area = (w * h) * 0.01  # 至少占画面 1%
         max_area = (w * h) * 0.8   # 最多占画面 80%
         
         for cnt in contours:
             area = cv2.contourArea(cnt)
-            if min_area < area < max_area:
-                x, y, bw, bh = cv2.boundingRect(cnt)
-                aspect_ratio = bw / float(bh)
-                
-                # 电表通常是竖直矩形，宽高比在 0.5-2 之间
-                if 0.5 < aspect_ratio < 2.0:
-                    conf = min(0.9, area / (w * h * 0.5))  # 简单的置信度估计
-                    # 若降采样过，坐标需缩放回原图
-                    if scale < 1.0:
-                        inv = 1.0 / scale
-                        x, y, bw, bh = int(x*inv), int(y*inv), int(bw*inv), int(bh*inv)
-                    detections.append((x, y, x+bw, y+bh, conf, 0))
+            if not (min_area < area < max_area):
+                continue
+
+            x, y, bw, bh = cv2.boundingRect(cnt)
+            aspect_ratio = bw / float(bh)
+            
+            # 电表通常是竖直矩形，宽高比在 0.5-2 之间
+            if 0.5 < aspect_ratio < 2.0:
+                conf = min(0.9, area / (w * h * 0.5))  # 简单的置信度估计
+                # 若降采样过，坐标需缩放回原图
+                if scale < 1.0:
+                    inv = 1.0 / scale
+                    x, y, bw, bh = int(x*inv), int(y*inv), int(bw*inv), int(bh*inv)
+                detections.append((x, y, x+bw, y+bh, conf, 0))
         
         # 按置信度排序
         detections.sort(key=lambda x: x[4], reverse=True)
