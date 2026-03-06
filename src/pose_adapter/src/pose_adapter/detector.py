@@ -16,7 +16,7 @@ class MeterDetector:
     使用 YOLOv8 模型检测电表，输出 bbox 和置信度
     """
     
-    def __init__(self, model_path=None, conf_threshold=0.5, iou_threshold=0.45):
+    def __init__(self, model_path=None, conf_threshold=0.5, iou_threshold=0.45, min_area_ratio=0.05):
         """
         初始化检测器
         
@@ -24,9 +24,12 @@ class MeterDetector:
             model_path: YOLOv8 模型路径，None 时使用默认参数
             conf_threshold: 置信度阈值
             iou_threshold: NMS IoU 阈值
+            min_area_ratio: 备用检测时允许的最小 bbox 面积占比（0-1）
         """
         self.conf_threshold = conf_threshold
         self.iou_threshold = iou_threshold
+        # 备用检测时使用的最小面积占比（例如 0.05 表示 5%）
+        self.min_area_ratio = float(min_area_ratio) if min_area_ratio is not None else 0.05
         
         # 尝试加载 YOLOv8
         self.model = None
@@ -38,8 +41,8 @@ class MeterDetector:
                 self.model = YOLO(str(model_path).strip())
                 self.use_yolo = True
                 rospy.loginfo(f"YOLOv8 模型加载成功: {model_path}")
-            except ImportError:
-                rospy.logwarn("ultralytics 未安装，使用备用检测方案")
+            except ImportError as e:
+                rospy.logwarn("ultralytics 导入失败（将使用备用检测）: %s" % e)
             except Exception as e:
                 rospy.logwarn(f"YOLO 模型加载失败: {e}")
         
@@ -121,8 +124,8 @@ class MeterDetector:
         # 查找轮廓
         contours, _ = cv2.findContours(binary, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
         
-        # 电表在画面中的面积可以较小，这里放宽下限到 1%
-        min_area = (w * h) * 0.01  # 至少占画面 1%
+        # 电表在画面中的面积：由 min_area_ratio 控制（默认 5%），上限 80%
+        min_area = (w * h) * max(0.0, min(self.min_area_ratio, 0.5))  # 至少占画面 min_area_ratio，防止设置过大
         max_area = (w * h) * 0.8   # 最多占画面 80%
         
         for cnt in contours:

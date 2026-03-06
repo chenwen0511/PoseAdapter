@@ -74,16 +74,6 @@ _start() {
 
     _init_conda
 
-    # ROS 环境
-    if [ -f "/opt/ros/noetic/setup.bash" ]; then
-        source /opt/ros/noetic/setup.bash
-    elif [ -f "/opt/ros/melodic/setup.bash" ]; then
-        source /opt/ros/melodic/setup.bash
-    else
-        echo "❌ 错误: 未找到 ROS 安装"
-        exit 1
-    fi
-
     if [ -f "$WORK_DIR/devel/setup.bash" ]; then
         source "$WORK_DIR/devel/setup.bash"
     elif [ -f "$WORK_DIR/install/setup.bash" ]; then
@@ -107,8 +97,19 @@ _start() {
     fi
 
     cd "$WORK_DIR"
-    # 使用 conda 时强制用系统 libffi，避免 cv_bridge 图像转换报错 ffi_type_pointer / libp11-kit
+    # 使用 conda 时：预加载 libgomp 修复 PyTorch "cannot allocate memory in static TLS block"；系统 libffi 修复 cv_bridge
     if [ -n "$CONDA_ENV" ]; then
+        # 必须预加载 PyTorch 自带的 libgomp（与 torch 版本匹配），否则 import torch 报 TLS 错误
+        LIBGOMP=""
+        if [ -n "${CONDA_PREFIX:-}" ]; then
+            LIBGOMP=$(find "${CONDA_PREFIX}/lib/python"*"/site-packages" -path "*torch*" -name "libgomp*.so*" 2>/dev/null | head -1)
+        fi
+        [ -z "$LIBGOMP" ] && LIBGOMP="/usr/lib/$(uname -m)-linux-gnu/libgomp.so.1"
+        [ -z "$LIBGOMP" ] && LIBGOMP="/usr/lib/$(uname -m)-linux-gnu/libgomp.so"
+        if [ -n "$LIBGOMP" ] && [ -f "$LIBGOMP" ]; then
+            export LD_PRELOAD="${LIBGOMP}${LD_PRELOAD:+:$LD_PRELOAD}"
+            echo "🔧 预加载 libgomp: $LIBGOMP" >> "$LOG_FILE"
+        fi
         SYS_FFI="/lib/$(uname -m)-linux-gnu/libffi.so.7"
         [ -f "$SYS_FFI" ] || SYS_FFI="/usr/lib/$(uname -m)-linux-gnu/libffi.so.7"
         if [ -f "$SYS_FFI" ]; then

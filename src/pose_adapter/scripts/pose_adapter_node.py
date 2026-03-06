@@ -4,6 +4,7 @@
 Pose Adapter 主节点 - 电表巡检核心逻辑
 """
 
+import sys
 import rospy
 from sensor_msgs.msg import Image
 from geometry_msgs.msg import Twist
@@ -30,6 +31,7 @@ class PoseAdapterNode:
     def __init__(self):
         """初始化节点"""
         rospy.init_node('pose_adapter', anonymous=True)
+        rospy.loginfo("节点运行 Python: %s" % sys.executable)
         
         # 参数
         self._load_params()
@@ -92,9 +94,11 @@ class PoseAdapterNode:
         # 低功耗：主循环频率 Hz（默认 5，低算力设备建议 3-5，高算力可 10-20）
         self.loop_hz = rospy.get_param('~loop_hz', 5)
         
-        # 模型路径
+        # 模型路径与检测参数
         self.yolo_model_path = rospy.get_param('~yolo_model_path', None)
         self.use_paddle_ocr = rospy.get_param('~use_paddle_ocr', False)
+        # 备用检测最小 bbox 面积占比（0-1），默认 0.05（5%）
+        self.min_bbox_area_ratio = rospy.get_param('~min_bbox_area_ratio', 0.05)
         
         # 标定文件
         self.calib_file = rospy.get_param('~calib_file', None)
@@ -192,7 +196,10 @@ class PoseAdapterNode:
             self.image_shape = (self.camera_height, self.camera_width)
         
         # 初始化模块（OCR 延迟至首次触发时加载，避免 PaddleOCR 导致段错误）
-        self.detector = MeterDetector(model_path=self.yolo_model_path)
+        self.detector = MeterDetector(
+            model_path=self.yolo_model_path,
+            min_area_ratio=self.min_bbox_area_ratio,
+        )
         self.tracker = DeepSORTTracker()
         self.pose_solver = PoseSolver(
             self.camera_matrix,

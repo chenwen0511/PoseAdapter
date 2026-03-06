@@ -141,6 +141,25 @@ roslaunch pose_adapter pose_adapter.launch calib_file:=/path/to/calib_result.yam
 
 pose_adapter **默认从话题 `/camera/image_raw` 获取图像**，与 `src/calibrate` 标定脚本约定一致。需有其他节点向该话题发布相机 raw 图。
 
+### 检测模型（YOLOv8 与备用检测）
+
+- **YOLOv8 检测**  
+  - 通过 `yolo_model_path` 参数指定 `.pt` 模型路径（例如在 `pose_adapter.launch` 中默认指向 `model/best.pt`）：  
+    ```bash
+    roslaunch pose_adapter pose_adapter.launch yolo_model_path:=/home/unitree/stephen/PoseAdapter/model/best.pt
+    ```  
+  - 在运行 `pose_adapter` 的 Python 环境（默认 `task` conda 环境）中，需要预先安装：  
+    ```bash
+    conda activate task
+    pip install "torch>=2.0" "ultralytics>=8.0"
+    ```  
+  - 若加载成功，日志中会看到：`YOLOv8 模型加载成功: ...`。
+
+- **备用检测（OpenCV 轮廓）**  
+  - 当 `ultralytics` 或模型加载失败时，会自动退回到备用检测，并打印：  
+    `ultralytics 导入失败（将使用备用检测）: ...` 或 `使用 OpenCV DNN 备用检测方案`。  
+  - 备用检测的最小 bbox 面积占比由 `min_bbox_area_ratio` 控制（0–1，默认 **0.05** 表示目标至少占画面 5% 才认为是电表，可按需调小以支持更远距离）。
+
 ### 调试图像与位姿日志
 
 - **调试图像话题**：`/pose_adapter/debug_image`，类型为 `sensor_msgs/Image`。  
@@ -173,6 +192,9 @@ pose_adapter **默认从话题 `/camera/image_raw` 获取图像**，与 `src/cal
 | `use_go2_camera` | false | 是否用 Go2 SDK 取流 |
 | `network_interface` | 空 | Unitree SDK 网卡，留空自动检测 |
 | `loop_hz` | 5 | 主循环频率（低算力建议 3–5） |
+| `yolo_model_path` | 空/见 launch | YOLOv8 检测模型路径，留空则使用备用检测 |
+| `min_bbox_area_ratio` | 0.05 | 备用检测最小 bbox 面积占比（0–1），影响远近电表是否被接受 |
+| `use_paddle_ocr` | false | 是否启用 PaddleOCR（true 时需额外依赖，低算力上建议谨慎） |
 | `show_debug_image` | false | 是否启动 image_view |
 
 ---
