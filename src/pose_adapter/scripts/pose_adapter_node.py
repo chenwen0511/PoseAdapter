@@ -111,6 +111,9 @@ class PoseAdapterNode:
         # 是否使用 Go2 相机 SDK 取流（默认 False，从 camera_image_topic 取图）
         self.use_go2_camera = rospy.get_param('~use_go2_camera', False)
 
+        # 是否使用 Unitree SDK high_level 接口控制（默认 False，使用 cmd_vel）
+        self.use_high_level_sdk = rospy.get_param('~use_high_level_sdk', False)
+
         # 图像话题（与 calibrate 一致默认 /camera/image_raw；由其他节点发布相机 raw）
         self.camera_image_topic = rospy.get_param('~camera_image_topic', '/camera/image_raw')
 
@@ -211,6 +214,8 @@ class PoseAdapterNode:
         self.controller = MotionController(
             target_distance=self.target_distance,
             distance_tolerance=self.distance_tolerance,
+            use_high_level_sdk=self.use_high_level_sdk,
+            interface_name=self.network_interface if self.network_interface else "eth0",
         )
         self.ocr = None  # 延迟初始化
         
@@ -356,7 +361,10 @@ class PoseAdapterNode:
         
         # 计算控制指令
         cmd = self.controller.compute_control(pose, ratio, offset)
-        self.cmd_vel_pub.publish(cmd)
+        
+        # SDK 模式下指令已在内部通过 Move 发送，无需发布到 cmd_vel 话题
+        if cmd is not None:
+            self.cmd_vel_pub.publish(cmd)
         
         # 检查是否到位
         if self.controller.is_ready_for_ocr():
