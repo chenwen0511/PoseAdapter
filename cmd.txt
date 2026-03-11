@@ -1,0 +1,14 @@
+
+rosrun image_view image_view image:=/camera/image_raw
+rosrun image_view image_view image:=/pose_adapter/debug_image
+rosrun image_view image_view image:=/camera/image_raw _filename_format:=/home/unitree/stephen/ros_images/img_%04d.jpg
+rosrun image_view video_recorder image:=/camera/image_raw _filename:=real_time_video.mp4
+
+tail -f /home/unitree/stephen/PoseAdapter/data/logs/pose_adapter.log
+cd ~/stephen/PoseAdapter && source /opt/ros/noetic/setup.bash && catkin_make
+LOOP_HZ=1 ./start.sh restart
+
+rostopic echo /cmd_vel
+
+/home/unitree/livox_nav/robot_dog_device/robot_dog_device/data/logs/robot_dog_device.log
+

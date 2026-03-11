@@ -16,8 +16,8 @@
   <arg name="meter_height" default="0.15"/>
   
   <!-- 控制参数 -->
-  <arg name="target_distance" default="1"/>
-  <arg name="target_ratio" default="0.5"/>
+  <arg name="target_distance" default="0.3"/> <!-- 直接控制“离电表多远”，当前逻辑在用 -->
+  <arg name="target_ratio" default="0.5"/> <!-- 画面占比，表示“目标画面占比”，已作为参数传入，但当前控制逻辑里还没参与判断，只占位备用。 -->
 
   <!-- 低算力：主循环 Hz，默认 5 以降低 CPU（高算力可设 10-20） -->
   <arg name="loop_hz" default="5"/>

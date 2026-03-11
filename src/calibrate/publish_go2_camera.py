@@ -113,15 +113,17 @@ class Go2CameraPublisher:
                 except queue.Full:
                     pass
 
-    def run(self):
+    def run(self, hz: float = 10.0):
         frame_queue = queue.Queue(maxsize=1)
         self._grab_running = True
         grab_thread = threading.Thread(target=self._grab_loop, args=(frame_queue,), daemon=True)
         grab_thread.start()
-        rospy.loginfo("取图已在后台线程运行，主循环每 0.5 秒检查一次…")
+        # 发布频率下限做一个保护，避免 0 或负数
+        hz = float(hz) if hz and hz > 0 else 10.0
+        rospy.loginfo("取图已在后台线程运行，发布频率约为 %.1f Hz" % hz)
         pub_count = 0
         wait_count = 0
-        rate = rospy.Rate(10)
+        rate = rospy.Rate(hz)
         while not rospy.is_shutdown():
             try:
                 frame = frame_queue.get(timeout=0.5)
@@ -145,6 +147,7 @@ def main():
     parser.add_argument("--topic", "-t", default="/camera/image_raw", help="发布的话题名")
     parser.add_argument("--network-interface", "-n", default="", help="DDS 网卡，如 eth0")
     parser.add_argument("--no-network-interface", action="store_true", help="不指定网卡，仅用 ChannelFactoryInitialize(0)")
+    parser.add_argument("--hz", type=float, default=10.0, help="发布频率 Hz（默认 10.0）")
     args = parser.parse_args()
 
     # 必须在 rospy.init_node 之前初始化 Unitree DDS
@@ -163,7 +166,7 @@ def main():
     rospy.init_node("go2_camera_publisher", anonymous=False)
     node = Go2CameraPublisher(args.topic)
     try:
-        node.run()
+        node.run(hz=args.hz)
     except rospy.ROSInterruptException:
         pass
     finally:
