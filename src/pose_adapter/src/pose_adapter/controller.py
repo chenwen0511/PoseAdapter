@@ -19,7 +19,7 @@ class MotionController:
     def __init__(self, 
                  target_distance=1.7,      # 目标距离（米）
                  target_ratio=0.65,         # 目标画面占比
-                 distance_tolerance=0.25,   # 距离容差（米）
+                 distance_tolerance=0.05,   # 距离容差（米）
                  angle_tolerance=2.0,       # 角度容差（度）
                  center_tolerance=0.05,     # 中心偏差容差
                  max_linear_speed=0.3,      # 最大线速度（m/s）
@@ -107,7 +107,9 @@ class MotionController:
             linear_vel = -self.kp_linear * distance_error
             # 限幅
             linear_vel = np.clip(linear_vel, -self.max_linear_speed, self.max_linear_speed)
-            cmd.linear.x = linear_vel
+
+            # 这里取反，因为向前移动时，距离误差为负，所以需要取反
+            cmd.linear.x = -1 * linear_vel
         
         # 角度控制（偏航角 + 中心偏差）
         # 将中心偏差转换为角度误差

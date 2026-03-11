@@ -89,6 +89,8 @@ class PoseAdapterNode:
         
         # 控制参数
         self.target_distance = rospy.get_param('~target_distance', 1.7)
+        # 距离容差（米）：|distance - target_distance| 小于该值时认为距离已 OK，不再前后挪
+        self.distance_tolerance = rospy.get_param('~distance_tolerance', 0.05)
         self.target_ratio = rospy.get_param('~target_ratio', 0.65)
 
         # 低功耗：主循环频率 Hz（默认 5，低算力设备建议 3-5，高算力可 10-20）
@@ -206,7 +208,10 @@ class PoseAdapterNode:
             self.dist_coeffs,
             (self.meter_width, self.meter_height)
         )
-        self.controller = MotionController(target_distance=self.target_distance)
+        self.controller = MotionController(
+            target_distance=self.target_distance,
+            distance_tolerance=self.distance_tolerance,
+        )
         self.ocr = None  # 延迟初始化
         
         rospy.loginfo("所有模块初始化完成")

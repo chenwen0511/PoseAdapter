@@ -9,4 +9,4 @@ source /opt/ros/noetic/setup.bash
 cd /home/unitree/stephen/PoseAdapter/src/calibrate
 
 # 启动相机发布（保持运行）
-python publish_go2_camera.py --no-network-interface --hz 10
+python publish_go2_camera.py --no-network-interface --hz 5
