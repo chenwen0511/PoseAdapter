@@ -367,8 +367,8 @@ class MotionController:
         
         # 根据误差决定使用哪种控制方式，并增加日志便于观测
         if not distance_ok:
-            # 距离不在范围内，使用 Move 控制
-            linear_vel = np.clip(-self.kp_linear * distance_error,
+            # 距离不在范围内，使用 Move 控制， 注意速度方向与距离误差方向相反
+            linear_vel = -1 * np.clip(-self.kp_linear * distance_error,
                                  -self.max_linear_speed, self.max_linear_speed)
             rospy.loginfo_throttle(
                 1.0,
