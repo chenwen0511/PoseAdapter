@@ -174,19 +174,21 @@ class MotionController:
         检查机器人是否处于站立状态
         
         Unitree Go2 状态机:
-        - mode: 0=Passive, 1=LowState, 2=Move, 3=StandDown, 4=Walk, etc.
+        - mode: 0=Passive(锁定), 1=LowState, 2=Move, 3=StandDown, 4=Walk, ...
+        - mode 9 = SportMode (运动模式)
         - gait_status: 0=Stop, 1=Trot, 2=Walk, etc.
+        
+        注意: StandUp/StandDown 会进入锁定状态，只有 mode 9 才是运动模式
         """
         try:
-            # 检查机器人模式和工作状态
-            # mode > 0 表示机器人已激活
-            # gait_status 非停止状态表示正在运动或已站立准备运动
+            # 获取机器人模式
             mode = getattr(state, 'mode', 0)
             gait_status = getattr(state, 'gait_status', 0)
             
-            # 机器人处于激活状态（非 Passive 模式）且不在停止状态
-            self.is_robot_standing = (mode > 0 and gait_status > 0) or (mode >= 2)
-            self.is_robot_unlocked = mode > 0
+            # mode 9 = SportMode (运动模式)
+            self.is_robot_unlocked = mode == 9
+            # 站立状态：运动模式下且不在停止状态
+            self.is_robot_standing = (mode == 9 and gait_status > 0)
             
         except Exception as e:
             rospy.logwarn(f"检查站立状态失败: {e}")
@@ -196,6 +198,10 @@ class MotionController:
     def ensure_robot_ready(self):
         """
         确保机器狗已站立并解锁，准备接受运动指令
+        
+        Unitree Go2 状态机:
+        - StandUp/StandDown 会进入锁定状态
+        - 只有 mode 9 (SportMode) 才是运动模式
         
         这是使用 high_level SDK 前的必要检查
         Returns:
@@ -208,23 +214,40 @@ class MotionController:
         self._update_robot_state()
         
         if not self.is_robot_unlocked:
-            rospy.logwarn("[Go2 SDK] 机器人未解锁，尝试站立...")
+            rospy.logwarn("[Go2 SDK] 机器人未进入运动模式 (mode 9)，尝试切换...")
+            # 先站立
             self.stand_up()
             rospy.sleep(2.0)  # 等待站立完成
-            self._update_robot_state()
-        
-        if not self.is_robot_standing:
-            rospy.logwarn("[Go2 SDK] 机器人未站立，尝试站立...")
-            self.stand_up()
-            rospy.sleep(2.0)  # 等待站立完成
+            
+            # 尝试切换到运动模式 - 调用一次 Move(0,0,0) 触发进入 mode 9
+            rospy.loginfo("[Go2 SDK] 发送 Move(0,0,0) 尝试进入运动模式...")
+            try:
+                self.sport_client.Move(0.0, 0.0, 0.0)
+                rospy.sleep(1.0)  # 等待模式切换
+            except Exception as e:
+                rospy.logwarn(f"切换运动模式失败: {e}")
+            
             self._update_robot_state()
         
         if self.is_robot_standing and self.is_robot_unlocked:
-            rospy.loginfo("[Go2 SDK] 机器人已就绪，可以接受运动指令")
+            rospy.loginfo("[Go2 SDK] 机器人已就绪 (mode 9)，可以接受运动指令")
             return True
         else:
-            rospy.logerr("[Go2 SDK] 机器人未能就绪，请检查机器狗状态")
-            return False
+            # 再次尝试
+            rospy.logwarn(f"[Go2 SDK] 当前 mode={getattr(self.robot_state, 'mode', 'unknown')}, 再次尝试进入运动模式...")
+            try:
+                self.sport_client.Move(0.0, 0.0, 0.0)
+                rospy.sleep(1.0)
+                self._update_robot_state()
+            except:
+                pass
+            
+            if self.is_robot_standing and self.is_robot_unlocked:
+                rospy.loginfo("[Go2 SDK] 机器人已就绪 (mode 9)")
+                return True
+            else:
+                rospy.logerr("[Go2 SDK] 机器人未能进入运动模式，请手动检查机器狗状态")
+                return False
     
     def _update_current_pose(self):
         """更新当前姿态"""
