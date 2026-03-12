@@ -202,6 +202,7 @@ class MotionController:
         Unitree Go2 状态机:
         - StandUp/StandDown 会进入锁定状态
         - 只有 mode 9 (SportMode) 才是运动模式
+        - BalanceStand() 可以让机器狗进入平衡站立状态并可运动
         
         这是使用 high_level SDK 前的必要检查
         Returns:
@@ -214,10 +215,10 @@ class MotionController:
         self._update_robot_state()
         
         if not self.is_robot_unlocked:
-            rospy.logwarn("[Go2 SDK] 机器人未进入运动模式 (mode 9)，尝试切换...")
-            # 先站立
-            self.stand_up()
-            rospy.sleep(2.0)  # 等待站立完成
+            rospy.logwarn("[Go2 SDK] 机器人未进入运动模式 (mode 9)，尝试平衡站立...")
+            # 使用 BalanceStand 进入平衡站立状态
+            self.balance_stand()
+            rospy.sleep(2.0)  # 等待平衡站立完成
             
             # 尝试切换到运动模式 - 调用一次 Move(0,0,0) 触发进入 mode 9
             rospy.loginfo("[Go2 SDK] 发送 Move(0,0,0) 尝试进入运动模式...")
