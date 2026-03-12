@@ -23,7 +23,7 @@ control:
 # Unitree SDK 控制模式（可选）
 # use_high_level_sdk: true 时使用 SDK，false 时使用 cmd_vel
 unitree_sdk:
-  enabled: false            # 是否启用 SDK 模式
+  enabled: true            # 是否启用 SDK 模式
   interface: "eth0"          # 网络接口名称 (eth0, enp2s0, wlan0 等)
 
 # 检测参数

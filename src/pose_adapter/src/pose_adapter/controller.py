@@ -210,20 +210,35 @@ class MotionController:
         if not self.sdk_initialized or not self.sport_client:
             return None
         
-        # 根据误差决定使用哪种控制方式
+        # 根据误差决定使用哪种控制方式，并增加日志便于观测
         if not distance_ok:
             # 距离不在范围内，使用 Move 控制
-            linear_vel = np.clip(-self.kp_linear * distance_error, 
-                               -self.max_linear_speed, self.max_linear_speed)
+            linear_vel = np.clip(-self.kp_linear * distance_error,
+                                 -self.max_linear_speed, self.max_linear_speed)
+            rospy.loginfo_throttle(
+                1.0,
+                f"[Go2 SDK] Move 距离控制: "
+                f"distance={distance:.3f}m, target={self.target_distance:.3f}m, "
+                f"error={distance_error:.3f}m, vx={linear_vel:.3f} m/s"
+            )
             # x 方向速度（前进/后退）
-            self.sport_client.Move(linear_vel, 0, 0)
+            self.sport_client.Move(linear_vel, 0.0, 0.0)
         elif not angle_ok:
             # 角度不在范围内，使用 Move 旋转
             angular_vel = np.clip(-self.kp_angular * np.radians(angle_error),
-                                 -self.max_angular_speed, self.max_angular_speed)
-            self.sport_client.Move(0, 0, angular_vel)
+                                  -self.max_angular_speed, self.max_angular_speed)
+            rospy.loginfo_throttle(
+                1.0,
+                f"[Go2 SDK] Move 角度控制: "
+                f"yaw_err={angle_error:.2f}deg, wz={angular_vel:.3f} rad/s"
+            )
+            self.sport_client.Move(0.0, 0.0, angular_vel)
         else:
             # 到位后停止移动
+            rospy.loginfo_throttle(
+                5.0,
+                "[Go2 SDK] 目标已到位，发送 StopMove() 停止运动"
+            )
             self.sport_client.StopMove()
             
             # 可以使用 Euler 调整姿态（微调）

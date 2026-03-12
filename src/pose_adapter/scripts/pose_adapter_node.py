@@ -111,8 +111,8 @@ class PoseAdapterNode:
         # 是否使用 Go2 相机 SDK 取流（默认 False，从 camera_image_topic 取图）
         self.use_go2_camera = rospy.get_param('~use_go2_camera', False)
 
-        # 是否使用 Unitree SDK high_level 接口控制（默认 False，使用 cmd_vel）
-        self.use_high_level_sdk = rospy.get_param('~use_high_level_sdk', False)
+        # 是否使用 Unitree SDK high_level 接口控制（默认 True，优先使用 SDK）
+        self.use_high_level_sdk = rospy.get_param('~use_high_level_sdk', True)
 
         # 图像话题（与 calibrate 一致默认 /camera/image_raw；由其他节点发布相机 raw）
         self.camera_image_topic = rospy.get_param('~camera_image_topic', '/camera/image_raw')
