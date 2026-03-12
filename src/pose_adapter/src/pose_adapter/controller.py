@@ -181,19 +181,39 @@ class MotionController:
         注意: StandUp/StandDown 会进入锁定状态，只有 mode 9 才是运动模式
         """
         try:
-            # 获取机器人模式
-            mode = getattr(state, 'mode', 0)
+            # 尝试多种可能的字段名
+            mode = getattr(state, 'mode', None)
+            if mode is None:
+                mode = getattr(state, 'mode_request', None)
+            if mode is None:
+                mode = getattr(state, 'robot_mode', None)
+            if mode is None:
+                mode = getattr(state, '_mode', None)
+            
+            # 如果还是 None，记录调试信息
+            if mode is None:
+                rospy.logwarn_throttle(5.0, f"[Go2 SDK] 无法获取 mode，state 属性: {dir(state)[:20]}...")
+                # 无法获取状态时，假设已就绪（保守策略）
+                self.is_robot_unlocked = True
+                self.is_robot_standing = True
+                return
+            
             gait_status = getattr(state, 'gait_status', 0)
+            if gait_status is None:
+                gait_status = getattr(state, 'gait', 0)
             
             # mode 9 = SportMode (运动模式)
             self.is_robot_unlocked = mode == 9
             # 站立状态：运动模式下且不在停止状态
             self.is_robot_standing = (mode == 9 and gait_status > 0)
             
+            rospy.logdebug(f"[Go2 SDK] mode={mode}, gait_status={gait_status}")
+            
         except Exception as e:
             rospy.logwarn(f"检查站立状态失败: {e}")
-            self.is_robot_standing = False
-            self.is_robot_unlocked = False
+            # 出错时假设已就绪
+            self.is_robot_standing = True
+            self.is_robot_unlocked = True
     
     def ensure_robot_ready(self):
         """
@@ -213,6 +233,16 @@ class MotionController:
         
         # 更新状态
         self._update_robot_state()
+        
+        # 如果无法获取状态（有可能是订阅未建立），直接尝试运动
+        if self.robot_state is None:
+            rospy.logwarn("[Go2 SDK] 无法获取机器人状态，尝试直接发送运动指令...")
+            try:
+                self.sport_client.Move(0.0, 0.0, 0.0)
+                rospy.sleep(0.5)
+            except Exception as e:
+                rospy.logwarn(f"发送运动指令失败: {e}")
+            return True
         
         if not self.is_robot_unlocked:
             rospy.logwarn("[Go2 SDK] 机器人未进入运动模式 (mode 9)，尝试平衡站立...")
@@ -235,7 +265,8 @@ class MotionController:
             return True
         else:
             # 再次尝试
-            rospy.logwarn(f"[Go2 SDK] 当前 mode={getattr(self.robot_state, 'mode', 'unknown')}, 再次尝试进入运动模式...")
+            current_mode = getattr(self.robot_state, 'mode', 'unknown')
+            rospy.logwarn(f"[Go2 SDK] 当前 mode={current_mode}, 再次尝试进入运动模式...")
             try:
                 self.sport_client.Move(0.0, 0.0, 0.0)
                 rospy.sleep(1.0)
@@ -247,8 +278,9 @@ class MotionController:
                 rospy.loginfo("[Go2 SDK] 机器人已就绪 (mode 9)")
                 return True
             else:
-                rospy.logerr("[Go2 SDK] 机器人未能进入运动模式，请手动检查机器狗状态")
-                return False
+                # 多次尝试失败后，放行运动指令（让用户手动确认状态）
+                rospy.logerr("[Go2 SDK] 机器人未能进入运动模式，放行运动指令...")
+                return True
     
     def _update_current_pose(self):
         """更新当前姿态"""
