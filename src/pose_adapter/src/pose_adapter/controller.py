@@ -87,6 +87,11 @@ class MotionController:
         self.sport_client = None
         self.sdk_initialized = False
         
+        # 机器人状态
+        self.robot_state = None  # 机器人当前状态
+        self.is_robot_standing = False  # 机器人是否站立
+        self.is_robot_unlocked = False  # 机器人是否已解锁（解除运动限制）
+        
         # 初始化
         if self.use_high_level_sdk:
             self._init_high_level_sdk()
@@ -150,6 +155,77 @@ class MotionController:
         except Exception as e:
             rospy.logwarn(f"姿态订阅失败: {e}")
     
+    def _update_robot_state(self):
+        """更新机器人状态"""
+        if hasattr(self, 'pose_sub') and self.pose_sub.HasReceived():
+            state = self.pose_sub.Get()
+            if state:
+                self.robot_state = state
+                # 从状态中获取欧拉角 (roll, pitch, yaw)
+                self.current_euler = [state.imu.rpy[0], state.imu.rpy[1], state.imu.rpy[2]]
+                
+                # 检查机器人是否处于站立状态
+                # 状态值: 0=Idle, 1=StandUp, 2=Walk, 3=StandDown, 4=BalanceStand, etc.
+                # 具体状态定义需参考 Unitree SDK
+                self._check_standing_state(state)
+    
+    def _check_standing_state(self, state):
+        """
+        检查机器人是否处于站立状态
+        
+        Unitree Go2 状态机:
+        - mode: 0=Passive, 1=LowState, 2=Move, 3=StandDown, 4=Walk, etc.
+        - gait_status: 0=Stop, 1=Trot, 2=Walk, etc.
+        """
+        try:
+            # 检查机器人模式和工作状态
+            # mode > 0 表示机器人已激活
+            # gait_status 非停止状态表示正在运动或已站立准备运动
+            mode = getattr(state, 'mode', 0)
+            gait_status = getattr(state, 'gait_status', 0)
+            
+            # 机器人处于激活状态（非 Passive 模式）且不在停止状态
+            self.is_robot_standing = (mode > 0 and gait_status > 0) or (mode >= 2)
+            self.is_robot_unlocked = mode > 0
+            
+        except Exception as e:
+            rospy.logwarn(f"检查站立状态失败: {e}")
+            self.is_robot_standing = False
+            self.is_robot_unlocked = False
+    
+    def ensure_robot_ready(self):
+        """
+        确保机器狗已站立并解锁，准备接受运动指令
+        
+        这是使用 high_level SDK 前的必要检查
+        Returns:
+            bool: True 表示机器人已就绪
+        """
+        if not self.use_high_level_sdk or not self.sport_client or not self.sdk_initialized:
+            return True  # 非 SDK 模式直接返回
+        
+        # 更新状态
+        self._update_robot_state()
+        
+        if not self.is_robot_unlocked:
+            rospy.logwarn("[Go2 SDK] 机器人未解锁，尝试站立...")
+            self.stand_up()
+            rospy.sleep(2.0)  # 等待站立完成
+            self._update_robot_state()
+        
+        if not self.is_robot_standing:
+            rospy.logwarn("[Go2 SDK] 机器人未站立，尝试站立...")
+            self.stand_up()
+            rospy.sleep(2.0)  # 等待站立完成
+            self._update_robot_state()
+        
+        if self.is_robot_standing and self.is_robot_unlocked:
+            rospy.loginfo("[Go2 SDK] 机器人已就绪，可以接受运动指令")
+            return True
+        else:
+            rospy.logerr("[Go2 SDK] 机器人未能就绪，请检查机器狗状态")
+            return False
+    
     def _update_current_pose(self):
         """更新当前姿态"""
         if hasattr(self, 'pose_sub') and self.pose_sub.HasReceived():
@@ -157,6 +233,8 @@ class MotionController:
             if state:
                 # 从状态中获取欧拉角 (roll, pitch, yaw)
                 self.current_euler = [state.imu.rpy[0], state.imu.rpy[1], state.imu.rpy[2]]
+                # 同时检查站立状态
+                self._check_standing_state(state)
     
     def compute_control(self, pose, bbox_ratio, center_offset):
         """
@@ -190,7 +268,21 @@ class MotionController:
         使用 high_level SDK 计算控制指令
         
         主要使用 Euler 调整姿态 + Move 控制移动
+        
+        安全检查：
+        1. 确保机器狗已站立
+        2. 确保机器狗已解锁（解除运动限制）
         """
+        # 安全检查：确保机器狗已就绪
+        if not self.ensure_robot_ready():
+            rospy.logwarn_throttle(
+                2.0,
+                "[Go2 SDK] 机器狗未就绪，停止运动指令"
+            )
+            if self.sport_client:
+                self.sport_client.StopMove()
+            return None
+        
         # 更新当前姿态
         self._update_current_pose()
         
@@ -335,12 +427,17 @@ class MotionController:
         if self.use_high_level_sdk and self.sport_client:
             self.sport_client.StandUp()
             rospy.loginfo("站立 (SDK)")
+            # 更新状态标志
+            self.is_robot_standing = True
+            self.is_robot_unlocked = True
     
     def stand_down(self):
         """趴下"""
         if self.use_high_level_sdk and self.sport_client:
             self.sport_client.StandDown()
             rospy.loginfo("趴下 (SDK)")
+            # 更新状态标志
+            self.is_robot_standing = False
     
     def balance_stand(self):
         """平衡站立"""
