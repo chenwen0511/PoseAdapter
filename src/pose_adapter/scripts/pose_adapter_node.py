@@ -215,7 +215,7 @@ class PoseAdapterNode:
             target_distance=self.target_distance,
             distance_tolerance=self.distance_tolerance,
             use_high_level_sdk=self.use_high_level_sdk,
-            interface_name=self.network_interface if self.network_interface else "eth0",
+            interface_name=self.network_interface if self.network_interface else "eth1",
         )
         self.ocr = None  # 延迟初始化
         

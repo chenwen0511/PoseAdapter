@@ -109,12 +109,19 @@ class MotionController:
     def _init_high_level_sdk(self):
         """初始化 Unitree SDK high_level 接口"""
         try:
+            import os
+            cyclonedds = os.environ.get("CYCLONEDDS_HOME", "")
+            rospy.loginfo(
+                "[Go2 SDK] 环境: CYCLONEDDS_HOME=%s, 网口: %s",
+                cyclonedds if cyclonedds else "(未设置)",
+                self.interface_name,
+            )
             from unitree_sdk2py.core.channel import ChannelFactoryInitialize
             from unitree_sdk2py.go2.sport.sport_client import SportClient
             from unitree_sdk2py.idl.default import unitree_go_msg_dds__SportModeState_
             from unitree_sdk2py.core.channel import ChannelSubscriber
             
-            # 初始化 DDS 通道
+            # 初始化 DDS 通道（与手动运行 go2_sport_client.py eth1 一致）
             ChannelFactoryInitialize(0, self.interface_name)
             rospy.loginfo(f"Unitree SDK DDS 通道已初始化（接口: {self.interface_name}）")
             
