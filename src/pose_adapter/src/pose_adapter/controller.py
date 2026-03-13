@@ -14,6 +14,14 @@ import numpy as np
 import time
 
 
+class MotionState:
+    """运动状态机"""
+    IDLE = "idle"           # 空闲，等待控制
+    MOVING = "moving"       # 正在前进/后退
+    ROTATING = "rotating"   # 正在旋转
+    WAITING = "waiting"     # 等待运动执行完成
+
+
 class MotionController:
     """
     运动控制器
@@ -75,6 +83,13 @@ class MotionController:
         self.is_positioned = False
         self.positioned_count = 0
         self.positioned_threshold = 10  # 连续多少帧达标才算到位
+        
+        # 运动状态机（解决控制频率问题）
+        self.motion_state = MotionState.IDLE
+        self.motion_start_time = 0.0      # 运动开始时间
+        self.estimated_duration = 0.0      # 预估运动持续时间(秒)
+        self.wait_timeout = 2.0            # 等待超时时间(秒)
+        self.motion_type = None            # 当前运动类型: "move_forward", "move_backward", "rotate_left", "rotate_right"
         
         # 当前姿态（用于 high_level 模式）
         self.current_euler = [0.0, 0.0, 0.0]  # roll, pitch, yaw
@@ -303,6 +318,11 @@ class MotionController:
         """
         计算控制指令
         
+        使用预估时间方案：
+        1. 如果正在等待运动完成，检查是否超时
+        2. 如果超时或空闲，计算控制量并预估执行时间
+        3. 下发命令后进入等待状态
+        
         Args:
             pose: 位姿字典（来自 PoseSolver）
             bbox_ratio: 画面占比
@@ -315,6 +335,7 @@ class MotionController:
             rospy.logwarn("位姿解算失败，停止运动")
             if self.use_high_level_sdk and self.sport_client:
                 self.sport_client.StopMove()
+            self._reset_motion_state()
             return Twist()
         
         distance = pose['distance']
@@ -326,11 +347,65 @@ class MotionController:
         else:
             return self._compute_cmd_vel_control(distance, yaw, offset_x)
     
+    def _reset_motion_state(self):
+        """重置运动状态"""
+        self.motion_state = MotionState.IDLE
+        self.motion_type = None
+    
+    def _check_wait_timeout(self):
+        """检查等待是否超时"""
+        current_time = time.time()
+        elapsed = current_time - self.motion_start_time
+        
+        if elapsed > self.wait_timeout:
+            rospy.logwarn(f"[运动控制] 等待超时 ({elapsed:.1f}s > {self.wait_timeout}s)，重置状态")
+            self._reset_motion_state()
+            return True
+        return False
+    
+    def _estimate_motion_duration(self, distance_error, angle_error):
+        """
+        预估运动持续时间
+        
+        Args:
+            distance_error: 距离误差（米）
+            angle_error: 角度误差（度）
+            
+        Returns:
+            预估时间（秒）
+        """
+        # 距离预估时间
+        if abs(distance_error) > self.distance_tolerance:
+            # 假设平均速度是最大速度的 60%（考虑加减速）
+            avg_linear_speed = self.max_linear_speed * 0.6
+            distance_duration = abs(distance_error) / avg_linear_speed
+        else:
+            distance_duration = 0
+        
+        # 角度预估时间
+        if abs(angle_error) > self.angle_tolerance:
+            # 假设平均角速度是最大角速度的 60%
+            avg_angular_speed = self.max_angular_speed * 0.6
+            angle_duration = abs(np.radians(angle_error)) / avg_angular_speed
+        else:
+            angle_duration = 0
+        
+        # 取较大值 + 0.5秒余量
+        duration = max(distance_duration, angle_duration) + 0.5
+        
+        # 限制在合理范围
+        duration = np.clip(duration, 0.5, 3.0)
+        
+        return duration
+    
     def _compute_high_level_control(self, distance, yaw, offset_x):
         """
         使用 high_level SDK 计算控制指令
         
-        主要使用 Euler 调整姿态 + Move 控制移动
+        预估时间方案：
+        1. 如果正在等待运动完成，不重复下发命令
+        2. 计算预估执行时间，下发命令后进入等待状态
+        3. 等待完成后重新检测位姿
         
         安全检查：
         1. 确保机器狗已站立
@@ -344,15 +419,14 @@ class MotionController:
             )
             if self.sport_client:
                 self.sport_client.StopMove()
+            self._reset_motion_state()
             return None
         
         # 更新当前姿态
         self._update_current_pose()
         
-        # 距离控制
+        # 计算误差
         distance_error = distance - self.target_distance
-        
-        # 角度控制
         angle_error = yaw + offset_x * 30  # 中心偏差贡献角度误差
         
         # 判断是否到位
@@ -362,42 +436,70 @@ class MotionController:
         
         self._check_positioned(distance_error, angle_error, offset_x)
         
+        # 检查等待超时
+        if self.motion_state == MotionState.WAITING:
+            if self._check_wait_timeout():
+                rospy.logwarn("[Go2 SDK] 等待超时，重置状态继续控制")
+            else:
+                # 正在等待中，不重复下发命令
+                elapsed = time.time() - self.motion_start_time
+                rospy.loginfo_throttle(
+                    0.5,
+                    f"[Go2 SDK] 等待运动完成... ({elapsed:.1f}/{self.estimated_duration:.1f}s)"
+                )
+                return None
+        
+        # 如果已到位，停止等待状态
+        if distance_ok and angle_ok and center_ok:
+            if self.motion_state != MotionState.IDLE:
+                rospy.loginfo("[Go2 SDK] 目标已到位，停止运动")
+                if self.sport_client:
+                    self.sport_client.StopMove()
+                self._reset_motion_state()
+            return None
+        
         if not self.sdk_initialized or not self.sport_client:
             return None
         
-        # 根据误差决定使用哪种控制方式，并增加日志便于观测
+        # 预估运动持续时间
+        self.estimated_duration = self._estimate_motion_duration(distance_error, angle_error)
+        
+        # 根据误差决定使用哪种控制方式
         if not distance_ok:
-            # 距离不在范围内，使用 Move 控制， 注意速度方向与距离误差方向相反
+            # 距离不在范围内，使用 Move 控制
             linear_vel = -1 * np.clip(-self.kp_linear * distance_error,
                                  -self.max_linear_speed, self.max_linear_speed)
-            rospy.loginfo_throttle(
-                1.0,
-                f"[Go2 SDK] Move 距离控制: "
-                f"distance={distance:.3f}m, target={self.target_distance:.3f}m, "
-                f"error={distance_error:.3f}m, vx={linear_vel:.3f} m/s"
+            
+            rospy.loginfo(
+                f"[Go2 SDK] 距离控制: distance={distance:.3f}m, target={self.target_distance:.3f}m, "
+                f"error={distance_error:.3f}m, vx={linear_vel:.3f} m/s, 预估持续{self.estimated_duration:.1f}s"
             )
-            # x 方向速度（前进/后退）
+            
+            # 记录运动类型
+            self.motion_type = "move_forward" if linear_vel > 0 else "move_backward"
+            
+            # 下发命令并进入等待状态
             self.sport_client.Move(linear_vel, 0.0, 0.0)
+            self.motion_state = MotionState.WAITING
+            self.motion_start_time = time.time()
+            
         elif not angle_ok:
             # 角度不在范围内，使用 Move 旋转
             angular_vel = np.clip(-self.kp_angular * np.radians(angle_error),
                                   -self.max_angular_speed, self.max_angular_speed)
-            rospy.loginfo_throttle(
-                1.0,
-                f"[Go2 SDK] Move 角度控制: "
-                f"yaw_err={angle_error:.2f}deg, wz={angular_vel:.3f} rad/s"
-            )
-            self.sport_client.Move(0.0, 0.0, angular_vel)
-        else:
-            # 到位后停止移动
-            rospy.loginfo_throttle(
-                5.0,
-                "[Go2 SDK] 目标已到位，发送 StopMove() 停止运动"
-            )
-            self.sport_client.StopMove()
             
-            # 可以使用 Euler 调整姿态（微调）
-            # self._adjust_euler(offset_x, offset_y)
+            rospy.loginfo(
+                f"[Go2 SDK] 角度控制: yaw_err={angle_error:.2f}deg, wz={angular_vel:.3f} rad/s, "
+                f"预估持续{self.estimated_duration:.1f}s"
+            )
+            
+            # 记录运动类型
+            self.motion_type = "rotate_right" if angular_vel > 0 else "rotate_left"
+            
+            # 下发命令并进入等待状态
+            self.sport_client.Move(0.0, 0.0, angular_vel)
+            self.motion_state = MotionState.WAITING
+            self.motion_start_time = time.time()
         
         # 返回 None 表示已通过 SDK 发送指令
         return None
@@ -430,26 +532,78 @@ class MotionController:
     def _compute_cmd_vel_control(self, distance, yaw, offset_x):
         """
         使用 cmd_vel 计算控制指令
+        
+        预估时间方案：
+        1. 如果正在等待运动完成，不重复下发命令
+        2. 计算预估执行时间，下发命令后进入等待状态
         """
+        # 计算误差
+        distance_error = distance - self.target_distance
+        angle_error = yaw + offset_x * 30
+        
+        # 判断是否到位
+        distance_ok = abs(distance_error) <= self.distance_tolerance
+        angle_ok = abs(angle_error) <= self.angle_tolerance
+        center_ok = abs(offset_x) <= self.center_tolerance
+        
+        self._check_positioned(distance_error, angle_error, offset_x)
+        
+        # 检查等待超时
+        if self.motion_state == MotionState.WAITING:
+            if self._check_wait_timeout():
+                rospy.logwarn("[cmd_vel] 等待超时，重置状态继续控制")
+            else:
+                # 正在等待中，不重复下发命令
+                elapsed = time.time() - self.motion_start_time
+                rospy.loginfo_throttle(
+                    0.5,
+                    f"[cmd_vel] 等待运动完成... ({elapsed:.1f}/{self.estimated_duration:.1f}s)"
+                )
+                return None
+        
+        # 如果已到位，停止等待状态
+        if distance_ok and angle_ok and center_ok:
+            if self.motion_state != MotionState.IDLE:
+                rospy.loginfo("[cmd_vel] 目标已到位，停止运动")
+                self._reset_motion_state()
+            return None
+        
         cmd = Twist()
         
-        distance_error = distance - self.target_distance
+        # 预估运动持续时间
+        self.estimated_duration = self._estimate_motion_duration(distance_error, angle_error)
         
         # 距离控制
-        if abs(distance_error) > self.distance_tolerance:
+        if not distance_ok:
             linear_vel = -self.kp_linear * distance_error
             linear_vel = np.clip(linear_vel, -self.max_linear_speed, self.max_linear_speed)
             cmd.linear.x = linear_vel
+            
+            self.motion_type = "move_forward" if linear_vel > 0 else "move_backward"
+            rospy.loginfo(
+                f"[cmd_vel] 距离控制: error={distance_error:.3f}m, vx={linear_vel:.3f}m/s, "
+                f"预估持续{self.estimated_duration:.1f}s"
+            )
+            
+            # 进入等待状态
+            self.motion_state = MotionState.WAITING
+            self.motion_start_time = time.time()
         
-        # 角度控制
-        angle_error = yaw + offset_x * 30
-        if abs(angle_error) > self.angle_tolerance:
+        # 角度控制（只在距离到位时处理角度）
+        elif not angle_ok:
             angular_vel = -self.kp_angular * np.radians(angle_error)
             angular_vel = np.clip(angular_vel, -self.max_angular_speed, self.max_angular_speed)
             cmd.angular.z = angular_vel
-        
-        # 检查是否到位
-        self._check_positioned(distance_error, angle_error, offset_x)
+            
+            self.motion_type = "rotate_right" if angular_vel > 0 else "rotate_left"
+            rospy.loginfo(
+                f"[cmd_vel] 角度控制: error={angle_error:.2f}deg, wz={angular_vel:.3f}rad/s, "
+                f"预估持续{self.estimated_duration:.1f}s"
+            )
+            
+            # 进入等待状态
+            self.motion_state = MotionState.WAITING
+            self.motion_start_time = time.time()
         
         return cmd
     
