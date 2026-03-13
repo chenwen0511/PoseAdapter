@@ -36,16 +36,14 @@ class PoseAdapterNode:
         # 参数
         self._load_params()
 
-        # 优先从标定文件加载相机内参（如果提供）
+        # 相机内参：先置空，再由标定文件填充（若提供）
+        self.camera_matrix = None
+        self.dist_coeffs = None
+        self.image_shape = None
         self._load_calib_from_file()
         
         # CV 桥接
         self.bridge = CvBridge()
-        
-        # 相机参数
-        self.camera_matrix = None
-        self.dist_coeffs = None
-        self.image_shape = None
         
         # 模块
         self.detector = None
@@ -186,7 +184,7 @@ class PoseAdapterNode:
     def _init_modules(self):
         """初始化各模块（需要相机参数）"""
         if self.camera_matrix is None:
-            # 使用默认参数
+            # 未从标定文件加载到时使用默认参数
             rospy.logwarn("使用默认相机参数，建议进行标定")
             fx = 700.0
             fy = 700.0
@@ -199,6 +197,8 @@ class PoseAdapterNode:
             ], dtype=np.float64)
             self.dist_coeffs = np.array([0.1, -0.2, 0, 0, 0.05], dtype=np.float64)
             self.image_shape = (self.camera_height, self.camera_width)
+        else:
+            rospy.loginfo("使用标定文件内参进行 PnP 解算")
         
         # 初始化模块（OCR 延迟至首次触发时加载，避免 PaddleOCR 导致段错误）
         self.detector = MeterDetector(
@@ -215,7 +215,7 @@ class PoseAdapterNode:
             target_distance=self.target_distance,
             distance_tolerance=self.distance_tolerance,
             use_high_level_sdk=self.use_high_level_sdk,
-            interface_name=self.network_interface if self.network_interface else "eth0",
+            interface_name=self.network_interface if self.network_interface else "eth1",
         )
         self.ocr = None  # 延迟初始化
         

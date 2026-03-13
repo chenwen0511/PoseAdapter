@@ -121,6 +121,8 @@ _start() {
     # 每次启动覆盖日志，便于查看当前运行输出
     {
         echo "===== PoseAdapter 启动于 $(date '+%Y-%m-%d %H:%M:%S') ====="
+        echo "CYCLONEDDS_HOME=${CYCLONEDDS_HOME:-(未设置)}"
+        echo "network_interface: 由 launch 传入，默认 eth1；当前 LAUNCH_ARGS 含: $LAUNCH_ARGS"
         echo "参数: $LAUNCH_ARGS"
         echo ""
     } > "$LOG_FILE"
