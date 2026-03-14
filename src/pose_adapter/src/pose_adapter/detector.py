@@ -61,11 +61,7 @@ class MeterDetector:
                     except ImportError:
                         rospy.logwarn("PyTorch 未安装，使用 CPU")
                 
-                # 设置模型设备和推理参数
-                if self._device != 'cpu':
-                    # 启用 FP16 加速（Jetson Nano 支持）
-                    self.model.model.half()  # 转 FP16
-                
+                # 不转 FP16，避免与 ultralytics fuse_conv_and_bn 冲突（expected scalar type Half but found Float）
                 self.use_yolo = True
                 rospy.loginfo(f"YOLOv8 模型加载成功: {model_path}, 设备: {self._device}")
             except ImportError as e:
@@ -121,8 +117,8 @@ class MeterDetector:
     
     def _detect_yolo(self, cv_image):
         """使用 YOLOv8 检测"""
-        # 使用指定设备（GPU/CPU）和 FP16 加速
-        results = self.model(cv_image, verbose=False, device=self._device)
+        # 使用指定设备（GPU/CPU），强制 FP32 避免 Jetson 上 Half/Float 冲突
+        results = self.model(cv_image, verbose=False, device=self._device, half=False)
         detections = []
         
         for result in results:
