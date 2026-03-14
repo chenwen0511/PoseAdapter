@@ -7,6 +7,7 @@
 import cv2
 import numpy as np
 import rospy
+import time
 
 
 class MeterDetector:
@@ -16,7 +17,7 @@ class MeterDetector:
     使用 YOLOv8 模型检测电表，输出 bbox 和置信度
     """
     
-    def __init__(self, model_path=None, conf_threshold=0.5, iou_threshold=0.45, min_area_ratio=0.05):
+    def __init__(self, model_path=None, conf_threshold=0.5, iou_threshold=0.45, min_area_ratio=0.05, use_gpu=True):
         """
         初始化检测器
         
@@ -25,22 +26,48 @@ class MeterDetector:
             conf_threshold: 置信度阈值
             iou_threshold: NMS IoU 阈值
             min_area_ratio: 备用检测时允许的最小 bbox 面积占比（0-1）
+            use_gpu: 是否使用 GPU 加速（默认 True）
         """
         self.conf_threshold = conf_threshold
         self.iou_threshold = iou_threshold
         # 备用检测时使用的最小面积占比（例如 0.05 表示 5%）
         self.min_area_ratio = float(min_area_ratio) if min_area_ratio is not None else 0.05
+        self.use_gpu = use_gpu
+        
+        # 耗时统计
+        self._total_time = 0.0
+        self._count = 0
         
         # 尝试加载 YOLOv8
         self.model = None
         self.use_yolo = False
+        self._device = 'cpu'
         
         if model_path and str(model_path).strip():
             try:
                 from ultralytics import YOLO
                 self.model = YOLO(str(model_path).strip())
+                
+                # GPU 加速配置
+                if self.use_gpu:
+                    # 尝试使用 CUDA
+                    try:
+                        import torch
+                        if torch.cuda.is_available():
+                            self._device = 'cuda:0'
+                            rospy.loginfo("检测到 CUDA GPU，使用 GPU 加速")
+                        else:
+                            rospy.logwarn("未检测到 CUDA GPU，使用 CPU")
+                    except ImportError:
+                        rospy.logwarn("PyTorch 未安装，使用 CPU")
+                
+                # 设置模型设备和推理参数
+                if self._device != 'cpu':
+                    # 启用 FP16 加速（Jetson Nano 支持）
+                    self.model.model.half()  # 转 FP16
+                
                 self.use_yolo = True
-                rospy.loginfo(f"YOLOv8 模型加载成功: {model_path}")
+                rospy.loginfo(f"YOLOv8 模型加载成功: {model_path}, 设备: {self._device}")
             except ImportError as e:
                 rospy.logwarn("ultralytics 导入失败（将使用备用检测）: %s" % e)
             except Exception as e:
@@ -70,14 +97,32 @@ class MeterDetector:
         if cv_image is None:
             return []
 
+        start_time = time.time()
+        
         if self.use_yolo:
-            return self._detect_yolo(cv_image)
+            detections = self._detect_yolo(cv_image)
         else:
-            return self._detect_backup(cv_image)
+            detections = self._detect_backup(cv_image)
+        
+        # 耗时统计
+        elapsed = (time.time() - start_time) * 1000  # ms
+        self._total_time += elapsed
+        self._count += 1
+        avg_time = self._total_time / self._count if self._count > 0 else 0
+        
+        # 打印耗时日志（每帧或节流）
+        rospy.loginfo_throttle(
+            1.0,
+            f"[Detector] 检测耗时: {elapsed:.1f}ms, 平均: {avg_time:.1f}ms, "
+            f"设备: {self._device}, 检测数: {len(detections)}"
+        )
+        
+        return detections
     
     def _detect_yolo(self, cv_image):
         """使用 YOLOv8 检测"""
-        results = self.model(cv_image, verbose=False)
+        # 使用指定设备（GPU/CPU）和 FP16 加速
+        results = self.model(cv_image, verbose=False, device=self._device)
         detections = []
         
         for result in results:
