@@ -110,6 +110,19 @@ pip install empy catkin_pkg
 
 Adapter 节点位于 **`src/pose_adapter/`**，基于 **ROS1**。
 
+### 运行前准备（Go2 运动环境，必读）
+
+**整个 adapter 运动控制必须在以下条件下进行，否则可能出现只倾不走、步态异常或避障干扰：**
+
+1. **关闭避障**  
+   - 在 Unitree Go2 **APP** 中关闭避障，或  
+   - 在 Go2 上若已安装 ROS2：`ros2 go2 obstacles_avoidance stop`（关闭后再启动 pose_adapter）。  
+   - 本节点在 SDK 支持时可尝试自动关闭避障（见参数 `disable_obstacle_avoidance_on_start`），未支持时请手动关闭。
+
+2. **经典步态（稀碎步）**  
+   - 遥控器：**L2 + A** 让机器狗站立，再 **Start + R** 进入**经典步态**（稀碎步的经典运控模型）。  
+   - 确认机器狗处于该步态后再启动 pose_adapter，以保证前进/后退/转向与预期一致。
+
 ### 方式一：使用启动脚本（推荐）
 
 项目根目录提供 **`start.sh`**，支持 start/stop/restart/status：
@@ -196,12 +209,33 @@ pose_adapter **默认从话题 `/camera/image_raw` 获取图像**，与 `src/cal
 | `min_bbox_area_ratio` | 0.05 | 备用检测最小 bbox 面积占比（0–1），影响远近电表是否被接受 |
 | `use_paddle_ocr` | false | 是否启用 PaddleOCR（true 时需额外依赖，低算力上建议谨慎） |
 | `show_debug_image` | false | 是否启动 image_view |
+| `disable_obstacle_avoidance_on_start` | true | 运动前提：SDK 支持时是否在启动时尝试关闭避障；未支持时请 APP 或 `ros2 go2 obstacles_avoidance stop` |
+| `max_linear_speed` | 0.12 | 最大线速度（m/s） |
+| `min_linear_speed` | 0 | 最小线速度（m/s）；**若日志显示持续下发 Move 但狗不走**，可试设为 **0.12~0.15** 排除固件死区 |
+| `max_angular_speed` | 0.25 | 最大角速度（rad/s） |
+
+### Go2 SDK 运动诊断（下发 Move 但狗不走的排查）
+
+使用 Unitree SDK 控制时，节点会输出以下诊断日志，用于区分「没发指令」与「发了但狗不动」：
+
+- **首次下发**：当根据距离/角度误差发出运动指令时，会打印  
+  `[Go2 SDK] 已下发 Move(vx=..., vy=0, vyaw=0)；若狗仍不动: 1) 检查 APP sport_mode/避障/遥控器 2) 试 params 中 min_linear_speed=0.12~0.15 排除死区`
+- **等待期间**：进入“等待运动完成”后，**每约 2 秒**会打印一次  
+  `[Go2 SDK] [诊断] 持续下发 Move(vx=..., vy=..., vyaw=...)；若狗仍不动请查: 1) APP sport_mode 已开 2) 避障已关 3) 遥控器未切走控制权`
+
+**若持续看到上述日志且 vx 非零但狗仍不走**，请依次检查：
+
+1. **APP**：是否已开启 **sport 模式**（运动控制服务）。
+2. **避障**：是否已关闭（本节点会尝试自动关，未成功时需在 APP 或 `ros2 go2 obstacles_avoidance stop` 手动关）。
+3. **遥控器**：是否仍占用控制权（部分固件下遥控器优先，需释放或切到由 SDK 控制）。
+4. **固件死区**：在 `config/params.yaml` 或 launch 中设置 **`min_linear_speed: 0.12` 或 `0.15`**，使下发速度不低于该值，排除“小速度被固件忽略”的情况。
 
 ---
 
 ## 常见问题与对策
 
 - **ROS 图像转换失败：ffi_type_pointer / libp11-kit**：conda 与系统 libffi 冲突。`start.sh` 已自动用 `LD_PRELOAD` 加载系统 `libffi.so.7` 并优先系统库路径；若仍报错可尝试 `CONDA_ENV=` 不启用 conda 启动（仅当不依赖 conda 内 unitree_sdk2py 时）。
+- **Go2 收到 Move 但不走**：日志中若能看到「已下发 Move」「[诊断] 持续下发 Move」且 vx 非零，说明指令在持续发送，问题多在机器人/APP/固件侧。请按上文 **「Go2 SDK 运动诊断」** 一节逐项检查（sport_mode、避障、遥控器），并尝试将 **`min_linear_speed`** 设为 0.12~0.15 排除固件死区。
 - **遮挡/丢失**：启用**重检测机制**，丢失后快速重新识别。
 - **光照不均**：使用 **CLAHE** 增强，或切换**红外补光**。
 - **位姿抖动**：对位姿做**滑动平均滤波**（窗口 3–5 帧）。

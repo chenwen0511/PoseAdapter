@@ -71,6 +71,7 @@ _start() {
 
     echo "🚀 启动 PoseAdapter 电表巡检节点..."
     echo "📁 工作目录: $WORK_DIR"
+    echo "⚠️  运动控制需在「关闭避障 + 经典步态（稀碎步）」下进行：遥控器 L2+A 站立 → Start+R 经典步态；避障请在 APP 或 ros2 go2 obstacles_avoidance stop 关闭"
 
     _init_conda
 

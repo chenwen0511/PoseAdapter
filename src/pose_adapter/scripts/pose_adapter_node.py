@@ -111,6 +111,14 @@ class PoseAdapterNode:
 
         # 是否使用 Unitree SDK high_level 接口控制（默认 True，优先使用 SDK）
         self.use_high_level_sdk = rospy.get_param('~use_high_level_sdk', True)
+        # 运动前提：关闭避障。SDK 支持时是否在启动时尝试关闭避障
+        self.disable_obstacle_avoidance_on_start = rospy.get_param('~disable_obstacle_avoidance_on_start', True)
+        # 步态：use_classic_walk=false 时默认步态易走步，true 时稀碎步(部分固件下可能不迈步)
+        self.use_classic_walk = rospy.get_param('~use_classic_walk', False)
+        self.speed_level = rospy.get_param('~speed_level', 0)
+        self.max_linear_speed = rospy.get_param('~max_linear_speed', 0.12)
+        self.min_linear_speed = rospy.get_param('~min_linear_speed', 0.0)
+        self.max_angular_speed = rospy.get_param('~max_angular_speed', 0.25)
 
         # 图像话题（与 calibrate 一致默认 /camera/image_raw；由其他节点发布相机 raw）
         self.camera_image_topic = rospy.get_param('~camera_image_topic', '/camera/image_raw')
@@ -214,8 +222,14 @@ class PoseAdapterNode:
         self.controller = MotionController(
             target_distance=self.target_distance,
             distance_tolerance=self.distance_tolerance,
+            max_linear_speed=self.max_linear_speed,
+            min_linear_speed=self.min_linear_speed,
+            max_angular_speed=self.max_angular_speed,
             use_high_level_sdk=self.use_high_level_sdk,
             interface_name=self.network_interface if self.network_interface else "eth1",
+            disable_obstacle_avoidance_on_start=self.disable_obstacle_avoidance_on_start,
+            use_classic_walk=self.use_classic_walk,
+            speed_level=self.speed_level,
         )
         self.ocr = None  # 延迟初始化
         
@@ -330,7 +344,7 @@ class PoseAdapterNode:
         if target_track is None:
             rospy.logwarn_throttle(5, "丢失目标，尝试重新检测...")
             self.target_track_id = None
-            self.controller.stop()
+            # 不调用 controller.stop()，避免频繁 StopMove 导致原地抖；仅清空目标，下一帧重新选目标后再发 Move
             return
         
         _, bbox, conf = target_track

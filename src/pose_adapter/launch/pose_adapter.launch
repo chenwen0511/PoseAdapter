@@ -36,6 +36,15 @@
   <!-- 标定文件：留空则使用节点内默认内参；指定路径则从文件加载（如 $(find pose_adapter)/config/default_camera_calib.yaml） -->
   <arg name="calib_file" default=""/>
   
+  <!-- 运动前提：关闭避障 + 经典步态。SDK 支持时启动是否尝试关闭避障（未支持时请 APP 或 ros2 go2 obstacles_avoidance stop） -->
+  <arg name="disable_obstacle_avoidance_on_start" default="true"/>
+  <!-- 步态：use_classic_walk=true 时稀碎步（部分固件下 Move 可能不迈步）；false 时用默认步态便于真正走步。speed_level：-1=慢 0=普通 1=快 -->
+  <arg name="use_classic_walk" default="false"/>
+  <arg name="speed_level" default="0"/>
+  <arg name="max_linear_speed" default="0.12"/>
+  <arg name="min_linear_speed" default="0"/>
+  <arg name="max_angular_speed" default="0.25"/>
+  
   <!-- Pose Adapter 主节点 -->
   <node name="pose_adapter" pkg="pose_adapter" type="pose_adapter_node.py" output="screen">
     <param name="camera_width" value="$(arg camera_width)"/>
@@ -53,6 +62,12 @@
     <param name="network_interface" value="$(arg network_interface)"/>
     <param name="camera_image_topic" value="$(arg camera_image_topic)"/>
     <param name="loop_hz" value="$(arg loop_hz)"/>
+    <param name="disable_obstacle_avoidance_on_start" value="$(arg disable_obstacle_avoidance_on_start)"/>
+    <param name="use_classic_walk" value="$(arg use_classic_walk)"/>
+    <param name="speed_level" value="$(arg speed_level)"/>
+    <param name="max_linear_speed" value="$(arg max_linear_speed)"/>
+    <param name="min_linear_speed" value="$(arg min_linear_speed)"/>
+    <param name="max_angular_speed" value="$(arg max_angular_speed)"/>
   </node>
   
   <!-- 图像查看（可选，无显示器时需设为 false） -->
