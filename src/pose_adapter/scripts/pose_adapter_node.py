@@ -191,11 +191,9 @@ class PoseAdapterNode:
         else:
             self.image_sub = None
 
-        # 定时器（低算力设备降低 loop_hz 以节省 CPU）
-        period = 1.0 / max(1, min(30, self.loop_hz))
-        self.control_timer = rospy.Timer(rospy.Duration(period), self._control_loop)
-        self.image_timer = rospy.Timer(rospy.Duration(period), self._image_loop)
-        rospy.loginfo(f"主循环频率: {self.loop_hz} Hz")
+        # 定时器已移除，改用同步顺序执行
+        # 取图 → YOLO检测 → 追踪 → PnP → 控制(等待执行完成) → 循环
+        rospy.loginfo("使用同步顺序执行：取图 → 检测 → 追踪 → PnP → 控制(等待完成) → 循环")
 
     def _init_modules(self):
         """初始化各模块（需要相机参数）"""
@@ -476,13 +474,172 @@ class PoseAdapterNode:
             rospy.logerr(f"调试图像发布失败: {e}")
     
     def run(self):
-        """运行节点"""
-        rospy.spin()
+        """同步顺序执行主循环"""
+        rospy.loginfo("启动同步主循环：脚踏实地一步一步执行")
+        
+        while self.is_running and not rospy.is_shutdown():
+            try:
+                # 执行一次完整的检测→追踪→PnP→控制流程
+                self._execute_pipeline()
+                
+                # 检查是否需要退出
+                if not self.is_running:
+                    break
+                    
+            except rospy.ROSInterruptException:
+                break
+            except Exception as e:
+                rospy.logerr(f"主循环异常: {e}")
+                rospy.sleep(0.5)
+        
+        rospy.loginfo("主循环已退出")
+    
+    def _execute_pipeline(self):
+        """
+        同步顺序执行完整流程：
+        1. 取图
+        2. YOLO检测
+        3. 追踪
+        4. PnP位姿解算
+        5. 控制(等待执行完成)
+        """
+        pipeline_start = time.time()
+        
+        # ========== 1. 取图 ==========
+        cv_image = self._get_image()
+        if cv_image is None:
+            rospy.logwarn_throttle(2.0, "[Pipeline] 等待图像...")
+            rospy.sleep(0.1)
+            return
+        
+        self.image_shape = cv_image.shape[:2]
+        
+        # 延迟初始化模块
+        if self.detector is None:
+            self._init_modules()
+        
+        rospy.loginfo("[Pipeline] === 步骤1: 取图完成 ===")
+        
+        # ========== 2. YOLO检测 ==========
+        detections = self.detector.detect(cv_image)
+        rospy.loginfo(f"[Pipeline] === 步骤2: YOLO检测完成，检测到 {len(detections)} 个目标 ===")
+        
+        # 过滤异常检测框
+        h, w = self.image_shape
+        valid_detections = []
+        for det in detections:
+            x1, y1, x2, y2, conf, cls = det
+            bw = max(0, x2 - x1)
+            bh = max(0, y2 - y1)
+            if bw == 0 or bh == 0:
+                continue
+            area_ratio = float(bw * bh) / float(w * h)
+            if area_ratio >= 0.9:
+                rospy.logwarn(f"[Pipeline] 检测框过大({area_ratio:.2f})，丢弃: bbox=({x1}, {y1}, {x2}, {y2})")
+                continue
+            valid_detections.append(det)
+        
+        self.current_detections = valid_detections
+        
+        # ========== 3. 追踪 ==========
+        if valid_detections:
+            tracks = self.tracker.update(valid_detections)
+            self.current_tracks = tracks
+            
+            # 选择目标
+            if self.target_track_id is None and tracks:
+                self.target_track_id = self._select_target(tracks)
+        else:
+            self.current_tracks = []
+        
+        rospy.loginfo(f"[Pipeline] === 步骤3: 追踪完成，{len(self.current_tracks)} 个追踪 ===")
+        
+        # 发布调试图像
+        self._publish_debug_image(cv_image)
+        
+        # ========== 4. PnP位姿解算 + 5. 控制 ==========
+        if self.target_track_id is not None:
+            # 查找目标追踪
+            target_track = None
+            for track_id, bbox, conf in self.current_tracks:
+                if track_id == self.target_track_id:
+                    target_track = (track_id, bbox, conf)
+                    break
+            
+            if target_track is None:
+                rospy.logwarn("[Pipeline] 丢失目标，尝试重新检测...")
+                self.target_track_id = None
+                self.controller.stop()
+                return
+            
+            _, bbox, conf = target_track
+            
+            # 检查bbox是否异常
+            x1, y1, x2, y2 = bbox
+            bw = max(0, x2 - x1)
+            bh = max(0, y2 - y1)
+            if bw > 0 and bh > 0:
+                area_ratio = float(bw * bh) / float(w * h)
+                if area_ratio >= 0.9:
+                    rospy.logwarn(f"[Pipeline] 目标框过大({area_ratio:.2f})，跳过控制")
+                    self.controller.stop()
+                    return
+            
+            # PnP位姿解算
+            pose = self.pose_solver.solve(bbox, self.image_shape)
+            rospy.loginfo("[Pipeline] === 步骤4: PnP位姿解算完成 ===")
+            
+            # 计算控制指令
+            ratio = self.pose_solver.get_target_bbox_ratio(bbox, self.image_shape)
+            offset = self.pose_solver.get_center_offset(bbox, self.image_shape)
+            cmd = self.controller.compute_control(pose, ratio, offset)
+            
+            if cmd is not None:
+                self.cmd_vel_pub.publish(cmd)
+            
+            rospy.loginfo("[Pipeline] === 步骤5: 控制指令已下发，等待执行完成 ===")
+            
+            # 等待运动执行完成（核心：脚踏实地）
+            motion_complete = self.controller.wait_for_motion_complete()
+            if motion_complete:
+                rospy.loginfo("[Pipeline] 运动执行完成")
+            else:
+                rospy.logwarn("[Pipeline] 运动执行超时")
+            
+            # 检查是否到位，准备OCR
+            if self.controller.is_ready_for_ocr():
+                self._trigger_ocr(bbox)
+        else:
+            rospy.loginfo_throttle(2.0, "[Pipeline] 无目标，保持静止")
+            self.controller.stop()
+        
+        # 统计耗时
+        pipeline_elapsed = (time.time() - pipeline_start) * 1000
+        self._total_loop_time += pipeline_elapsed
+        self._loop_count += 1
+        avg_time = self._total_loop_time / self._loop_count if self._loop_count > 0 else 0
+        
+        rospy.loginfo(f"[Pipeline] 本轮耗时: {pipeline_elapsed:.1f}ms, 平均: {avg_time:.1f}ms")
+    
+    def _get_image(self):
+        """获取图像"""
+        # 优先从ROS话题取帧
+        if self.camera_image_topic and self.latest_ros_image is not None:
+            return self.latest_ros_image.copy()
+        
+        # 可选：使用Go2 SDK取流
+        if self.camera_handler and self.camera_handler.is_available():
+            frame = self.camera_handler.get_image_frame()
+            if frame is not None:
+                return frame
+        
+        return None
     
     def shutdown(self):
         """关闭节点"""
         self.is_running = False
         if self.controller:
+            self.controller.is_running = False
             self.controller.stop()
         rospy.loginfo("Pose Adapter 节点已关闭")
 

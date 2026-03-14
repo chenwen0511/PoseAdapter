@@ -102,6 +102,9 @@ class MotionController:
         self.wait_timeout = 6.0            # 等待超时时间(秒)，需大于预估时长否则会频繁超时导致停→抖→再走
         self.motion_type = None            # 当前运动类型: "move_forward", "move_backward", "rotate_left", "rotate_right"
         
+        # 运行状态（用于 wait_for_motion_complete）
+        self.is_running = True
+        
         # 当前姿态（用于 high_level 模式）
         self.current_euler = [0.0, 0.0, 0.0]  # roll, pitch, yaw
         self.target_euler = [0.0, 0.0, 0.0]
@@ -777,6 +780,7 @@ class MotionController:
     
     def stop(self):
         """停止运动"""
+        self.is_running = False
         if self.use_high_level_sdk and self.sport_client:
             self.sport_client.StopMove()
             rospy.loginfo("停止运动 (SDK)")
@@ -807,6 +811,47 @@ class MotionController:
         if self.use_high_level_sdk and self.sport_client:
             self.sport_client.BalanceStand()
             rospy.loginfo("平衡站立 (SDK)")
+    
+    def wait_for_motion_complete(self, timeout=None):
+        """
+        等待运动执行完成（同步阻塞）
+        
+        脚踏实地方案：每次控制指令下发后，等待狗执行完成再进行下一轮检测
+        
+        Args:
+            timeout: 超时时间（秒），默认使用 wait_timeout
+            
+        Returns:
+            bool: True 表示运动完成，False 表示超时
+        """
+        if timeout is None:
+            timeout = self.wait_timeout
+            
+        if self.motion_state != MotionState.WAITING:
+            # 没有在等待运动，直接返回
+            return True
+        
+        rospy.loginfo(f"[Motion] 开始等待运动完成，超时: {timeout}s")
+        start_time = time.time()
+        
+        while self.motion_state == MotionState.WAITING and self.is_running:
+            # 检查超时
+            elapsed = time.time() - start_time
+            if elapsed > timeout:
+                rospy.logwarn(f"[Motion] 等待运动完成超时 ({elapsed:.1f}s)")
+                self._reset_motion_state()
+                return False
+            
+            # 检查是否到位
+            if self.is_positioned:
+                rospy.loginfo(f"[Motion] 运动完成，耗时: {elapsed:.1f}s")
+                self._reset_motion_state()
+                return True
+            
+            # 短暂休眠，避免 busy wait
+            rospy.sleep(0.1)
+        
+        return True
     
     def is_ready_for_ocr(self):
         """检查是否准备好进行 OCR"""
