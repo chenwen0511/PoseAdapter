@@ -6,6 +6,7 @@ Pose Adapter 主节点 - 电表巡检核心逻辑
 
 import sys
 import rospy
+import time
 from sensor_msgs.msg import Image
 from geometry_msgs.msg import Twist
 from cv_bridge import CvBridge
@@ -100,6 +101,9 @@ class PoseAdapterNode:
         # 备用检测最小 bbox 面积占比（0-1），默认 0.05（5%）
         self.min_bbox_area_ratio = rospy.get_param('~min_bbox_area_ratio', 0.05)
         
+        # GPU 加速（默认 True，使用 NVIDIA Jetson 的 GPU）
+        self.use_gpu = rospy.get_param('~use_gpu', True)
+        
         # 标定文件
         self.calib_file = rospy.get_param('~calib_file', None)
 
@@ -117,6 +121,10 @@ class PoseAdapterNode:
 
         # 本地图片保存路径（拍照/调试）
         self.image_save_path = rospy.get_param('~image_save_path', '/tmp/pose_adapter_images')
+        
+        # 性能统计
+        self._total_loop_time = 0.0
+        self._loop_count = 0
 
     def _load_calib_from_file(self):
         """从标定文件加载相机内参（如果提供了 calib_file）"""
@@ -204,7 +212,10 @@ class PoseAdapterNode:
         self.detector = MeterDetector(
             model_path=self.yolo_model_path,
             min_area_ratio=self.min_bbox_area_ratio,
+            use_gpu=self.use_gpu,
         )
+        
+        rospy.loginfo(f"检测器 GPU 加速: {self.use_gpu}")
         self.tracker = DeepSORTTracker()
         self.pose_solver = PoseSolver(
             self.camera_matrix,
@@ -231,6 +242,8 @@ class PoseAdapterNode:
 
     def _image_loop(self, event):
         """图像循环：从 ROS 话题 /camera/image_raw 或 Go2 SDK 获取图像并进行检测/追踪"""
+        loop_start = time.time()
+        
         cv_image = None
 
         # 优先从话题取帧（默认，与 calibrate 一致）
@@ -286,6 +299,18 @@ class PoseAdapterNode:
                 self.target_track_id = self._select_target(tracks)
         else:
             self.current_tracks = []
+        
+        # 整体耗时统计
+        loop_elapsed = (time.time() - loop_start) * 1000  # ms
+        self._total_loop_time += loop_elapsed
+        self._loop_count += 1
+        avg_loop_time = self._total_loop_time / self._loop_count if self._loop_count > 0 else 0
+        
+        rospy.loginfo_throttle(
+            2.0,
+            f"[Pipeline] 总耗时: {loop_elapsed:.1f}ms, 平均: {avg_loop_time:.1f}ms, "
+            f"FPS: {1000.0/avg_loop_time:.1f}"
+        )
         
         # 发布调试图像（每 2 帧发布一次以降低 CPU）
         self._frame_count += 1

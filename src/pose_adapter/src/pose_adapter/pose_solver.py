@@ -7,6 +7,7 @@
 import cv2
 import numpy as np
 import rospy
+import time
 
 
 class PoseSolver:
@@ -41,6 +42,10 @@ class PoseSolver:
         # 位姿平滑滤波
         self.pose_history = []
         self.history_size = 5
+        
+        # 耗时统计
+        self._total_time = 0.0
+        self._count = 0
     
     def solve(self, bbox, image_shape):
         """
@@ -61,6 +66,8 @@ class PoseSolver:
                 'rvec': np.array    # 旋转向量
             }
         """
+        start_time = time.time()
+        
         x1, y1, x2, y2 = bbox
         
         # 从 bbox 获取 2D 点（四角，顺序需与 object_points 一一对应）
@@ -101,18 +108,25 @@ class PoseSolver:
                 'rvec': rvec.flatten()
             }
             
+            # 耗时统计
+            elapsed = (time.time() - start_time) * 1000  # ms
+            self._total_time += elapsed
+            self._count += 1
+            avg_time = self._total_time / self._count if self._count > 0 else 0
+            
             # 调试日志（节流，避免刷屏）
             rospy.loginfo_throttle(
                 1.0,
                 "[PnP] bbox=(%.1f, %.1f, %.1f, %.1f), "
                 "image_pts=%s, "
                 "distance=%.3f m, yaw=%.2f deg, pitch=%.2f deg, roll=%.2f deg, "
-                "tvec=%s" % (
+                "tvec=%s, 耗时=%.1fms, 平均=%.1fms" % (
                     x1, y1, x2, y2,
                     np.array2string(image_points, precision=1, suppress_small=True),
                     distance,
                     np.degrees(yaw), np.degrees(pitch), np.degrees(roll),
-                    np.array2string(tvec.flatten(), precision=3, suppress_small=True)
+                    np.array2string(tvec.flatten(), precision=3, suppress_small=True),
+                    elapsed, avg_time
                 )
             )
             
