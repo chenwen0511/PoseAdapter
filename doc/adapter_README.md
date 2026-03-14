@@ -161,10 +161,11 @@ pose_adapter **默认从话题 `/camera/image_raw` 获取图像**，与 `src/cal
     ```bash
     roslaunch pose_adapter pose_adapter.launch yolo_model_path:=/home/unitree/stephen/PoseAdapter/model/best.pt
     ```  
-  - 在运行 `pose_adapter` 的 Python 环境（默认 `task` conda 环境）中，需要预先安装：  
+  - 在运行 `pose_adapter` 的 Python 环境（默认 `task` conda 环境）中，需要预先安装 **Jetson CUDA 版** 的 torch/torchvision（否则会退回 CPU 或报 torchvision C++ ops 错误）。完整安装步骤见：**`doc/install_pytorch_cuda_jetson.md`**。  
+  - 仅作提示（不建议 Jetson 直接照抄这一行安装 torch）：  
     ```bash
     conda activate task
-    pip install "torch>=2.0" "ultralytics>=8.0"
+    pip install "ultralytics>=8.0"
     ```  
   - 若加载成功，日志中会看到：`YOLOv8 模型加载成功: ...`。
 
