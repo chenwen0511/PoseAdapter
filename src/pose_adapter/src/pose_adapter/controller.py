@@ -32,18 +32,18 @@ class MotionController:
 
     def __init__(self,
                  target_distance=0.3,      # 目标距离（米）
-                 target_ratio=0.65,         # 目标画面占比
+                 target_ratio=0.5,         # 目标画面占比
                  distance_tolerance=0.05,   # 距离容差（米）
                  angle_tolerance=2.0,       # 角度容差（度）
                  center_tolerance=0.05,     # 中心偏差容差
-                 max_linear_speed=0.12,     # 最大线速度（m/s），偏小更柔和
-                 min_linear_speed=0.0,      # 最小线速度（m/s）；>0 时用于排除固件死区
-                 max_angular_speed=0.25,    # 最大角速度（rad/s），偏小更柔和
+                 max_linear_speed=0.12,     # 最大线速度（m/s）
+                 min_linear_speed=0.12,     # 最小线速度（m/s）；必须>0.1才能避免固件死区
+                 max_angular_speed=0.25,    # 最大角速度（rad/s）
                  use_high_level_sdk=False,  # 是否使用 high_level SDK
                  interface_name="eth0",    # 网络接口名称
                  disable_obstacle_avoidance_on_start=True,  # 启动时是否尝试关闭避障
-                 use_classic_walk=False,  # 是否开启经典步态（稀碎步）；部分固件下 True 时 Move 不迈步，默认 False 便于走步
-                 speed_level=0):          # SDK 速度档位：-1=慢 0=普通 1=快
+                 use_classic_walk=True,    # 启用经典步态（稀碎步）
+                 speed_level=-1):           # SDK 速度档位：-1=慢 0=普通 1=快
         """
         初始化控制器
 
