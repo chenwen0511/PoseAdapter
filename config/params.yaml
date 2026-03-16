@@ -17,9 +17,9 @@ control:
   distance_tolerance: 0.05  # 距离容差
   angle_tolerance: 2.0      # 角度容差（度）
   center_tolerance: 0.05    # 中心偏差容差
-  max_linear_speed: 0.12    # 最大线速度（m/s），偏小更柔和
-  min_linear_speed: 0.0     # 最小线速度（m/s）；若狗收到 Move 但不走可试 0.12~0.15 排除固件死区
-  max_angular_speed: 0.25   # 最大角速度（rad/s），偏小更柔和
+  max_linear_speed: 0.15    # 最大线速度（m/s），稍微提高以确保能走动
+  min_linear_speed: 0.12   # 最小线速度（m/s）；必须>0.1才能避免固件死区，机器狗才能走动
+  max_angular_speed: 0.25   # 最大角速度（rad/s）
   
 # Unitree SDK 控制模式（可选）
 # use_high_level_sdk: true 时使用 SDK，false 时使用 cmd_vel
@@ -29,9 +29,10 @@ unitree_sdk:
   interface: "eth1"          # 网络接口名称 (eth0, enp2s0, wlan0 等)
   # 启动时尝试关闭避障（若 SDK 提供接口）；未支持时需在 APP 或 ros2 go2 obstacles_avoidance stop 手动关闭
   disable_obstacle_avoidance_on_start: true
-  # 步态：false=默认步态(易走步)，true=经典稀碎步(柔和但部分固件不迈步)。speed_level: -1=慢 0=普通 1=快
-  use_classic_walk: false
-  speed_level: 0
+  # 步态：必须设为 true 才能走小碎步！false=默认步态(易走步但步幅大)，true=经典稀碎步(柔和)
+  # 重要：use_classic_walk=true + speed_level=-1 是让机器狗小碎步走动的关键
+  use_classic_walk: true
+  speed_level: -1  # 速度档位：-1=慢速(适合小碎步)，0=普通，1=快速
 
 # 检测参数
 detection:

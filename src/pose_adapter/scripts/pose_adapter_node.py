@@ -133,6 +133,9 @@ class PoseAdapterNode:
         # 性能统计
         self._total_loop_time = 0.0
         self._loop_count = 0
+        
+        # 内存优化：减少调试图像发布频率
+        self._debug_image_interval = 5  # 每5帧发布一次调试图像（减少内存占用）
 
     def _load_calib_from_file(self):
         """从标定文件加载相机内参（如果提供了 calib_file）"""
@@ -324,9 +327,9 @@ class PoseAdapterNode:
             f"FPS: {1000.0/avg_loop_time:.1f}"
         )
         
-        # 发布调试图像（每 2 帧发布一次以降低 CPU）
+        # 发布调试图像（每N帧发布一次以降低CPU和内存）
         self._frame_count += 1
-        if self._frame_count % 2 == 0:
+        if self._frame_count % self._debug_image_interval == 0:
             self._publish_debug_image(cv_image)
     
     def _select_target(self, tracks):

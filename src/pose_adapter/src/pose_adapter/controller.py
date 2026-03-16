@@ -143,7 +143,7 @@ class MotionController:
     def _init_high_level_sdk(self):
         """
         初始化 Unitree SDK high_level 接口
-        
+
         业界最佳实践初始化流程:
         1. 初始化 DDS 通道
         2. 创建 SportClient
@@ -162,36 +162,36 @@ class MotionController:
             from unitree_sdk2py.core.channel import ChannelFactoryInitialize
             from unitree_sdk2py.go2.sport.sport_client import SportClient
             from unitree_sdk2py.core.channel import ChannelSubscriber
-            
+
             # Step 1: 初始化 DDS 通道（与手动运行 go2_sport_client.py eth1 一致）
             rospy.loginfo("[Go2 SDK] Step 1: 初始化 DDS 通道 (ChannelFactoryInitialize)")
             ChannelFactoryInitialize(0, self.interface_name)
             rospy.loginfo(f"[Go2 SDK] ✓ DDS 通道已初始化（接口: {self.interface_name}）")
-            
+
             # Step 2: 创建 SportClient
             rospy.loginfo("[Go2 SDK] Step 2: 创建 SportClient")
             self.sport_client = SportClient()
             self.sport_client.SetTimeout(10.0)
             self.sport_client.Init()
-            
+
             self.sdk_initialized = True
             rospy.loginfo("[Go2 SDK] ✓ SportClient 已初始化（high_level 模式）")
-            
+
             # Step 3: 订阅机器人状态
             rospy.loginfo("[Go2 SDK] Step 3: 订阅机器人状态 (rt/SportModeState)")
             self._subscribe_pose()
-            
+
             # Step 4: 关闭避障（运动控制需在关闭避障下运行）
             rospy.loginfo("[Go2 SDK] Step 4: 关闭避障")
             if self.disable_obstacle_avoidance_on_start:
                 self._try_disable_obstacle_avoidance()
-            
+
             # Step 5: 设置柔和步态
             rospy.loginfo("[Go2 SDK] Step 5: 设置柔和步态")
             self._set_gentle_gait()
-            
+
             rospy.loginfo("[Go2 SDK] ===== SDK 初始化完成 =====")
-            
+
         except ImportError as e:
             rospy.logerr(f"[Go2 SDK] ✗ Unitree SDK 导入失败: {e}")
             rospy.logwarn("回退到 cmd_vel 模式")
@@ -589,22 +589,12 @@ class MotionController:
     def _compute_high_level_control(self, distance, yaw, offset_x):
         """
         使用 high_level SDK 计算控制指令
-
-        根据 Unitree 官方文档最佳实践:
-        1. 确保机器狗已就绪 (BalanceStand + Move(0,0,0))
-        2. 关闭避障
-        3. 持续发送命令 - Go2 需要持续接收 Move 命令才会保持运动
-        4. 每次运动前重新调用 ClassicWalk(True) 保持步态柔和
-        5. 状态监控 - 订阅 rt/SportModeState 话题，检查 mode=9
-
-        预估时间方案：
-        1. 如果正在等待运动完成，不重复下发命令
-        2. 计算预估执行时间，下发命令后进入等待状态
-        3. 等待完成后重新检测位姿
-
-        安全检查：
-        1. 确保机器狗已站立
-        2. 确保机器狗已解锁（解除运动限制）
+        
+        运动控制关键点（解决机器狗往前倾斜不走步的问题）：
+        1. 必须设置 min_linear_speed > 0.1 否则固件会认为是倾斜
+        2. 必须使用 ClassicWalk(True) + SpeedLevel(-1) 才能小碎步
+        3. 确保在运动模式 (mode 9) 下才能走步
+        4. 持续发送命令保持运动状态
         """
         # ===== Step 1: 安全检查 - 确保机器狗已就绪 =====
         if not self.ensure_robot_ready():
@@ -616,48 +606,44 @@ class MotionController:
                 self.sport_client.StopMove()
             self._reset_motion_state()
             return None
-
+        
         # 更新当前姿态
         self._update_current_pose()
-
+        
         # 计算误差
         distance_error = distance - self.target_distance
         angle_error = yaw + offset_x * 30  # 中心偏差贡献角度误差
-
+        
         # 判断是否到位
         distance_ok = abs(distance_error) <= self.distance_tolerance
         angle_ok = abs(angle_error) <= self.angle_tolerance
         center_ok = abs(offset_x) <= self.center_tolerance
-
+        
         self._check_positioned(distance_error, angle_error, offset_x)
-
+        
         # ===== Step 2: 检查等待超时 - 持续发送命令避免狗停下来 =====
         if self.motion_state == MotionState.WAITING:
             if self._check_wait_timeout():
-                rospy.logwarn("[Go2 SDK] 等待超时，重置状态继续控制（不 StopMove，下一周期直接发新速度避免原地抖）")
-                # 不调用 StopMove()，下一周期会立刻发新的 Move()，避免停一下再走导致的"隔秒抖一下"
+                rospy.logwarn("[Go2 SDK] 等待超时，重置状态继续控制")
             else:
-                # ===== 持续发送命令 - 业界最佳实践 =====
-                # Go2 需要持续接收 Move 命令才会保持运动
-                # 运动中每隔一段时间重新施加柔和步态，避免中途切回激进
+                # ===== 持续发送命令 - 关键！Go2需要持续接收Move命令才会保持运动 =====
                 self._set_gentle_gait(quiet=True, throttle_interval=2.0)
-
+                
                 if self.sport_client and (self._waiting_vx != 0 or self._waiting_vy != 0 or self._waiting_vyaw != 0):
                     self.sport_client.Move(self._waiting_vx, self._waiting_vy, self._waiting_vyaw)
-
+                
                 elapsed = time.time() - self.motion_start_time
                 rospy.loginfo_throttle(
                     0.5,
-                    f"[Go2 SDK] 持续发送命令中... ({elapsed:.1f}/{self.estimated_duration:.1f}s)"
+                    f"[Go2 SDK] 持续发送命令... ({elapsed:.1f}/{self.estimated_duration:.1f}s)"
                 )
-                # 每 2 秒打一次诊断：确认在持续下发 Move，便于排查"不发指令"vs"发了但狗不动"
                 rospy.loginfo_throttle(
                     2.0,
-                    "[Go2 SDK] [诊断] 持续下发 Move(vx=%.3f, vy=%.3f, vyaw=%.3f)；若狗仍不动请查: 1) APP sport_mode 已开 2) 避障已关 3) 遥控器未切走控制权",
+                    "[Go2 SDK] [诊断] Move(vx=%.3f, vy=%.3f, vyaw=%.3f)",
                     self._waiting_vx, self._waiting_vy, self._waiting_vyaw,
                 )
                 return None
-
+        
         # 如果已到位，停止等待状态
         if distance_ok and angle_ok and center_ok:
             if self.motion_state != MotionState.IDLE:
@@ -666,74 +652,77 @@ class MotionController:
                     self.sport_client.StopMove()
                 self._reset_motion_state()
             return None
-
+        
         if not self.sdk_initialized or not self.sport_client:
             return None
-
+        
         # 预估运动持续时间
         self.estimated_duration = self._estimate_motion_duration(distance_error, angle_error)
-
-        # 根据误差决定使用哪种控制方式
+        
+        # ===== Step 3: 根据误差决定控制方式 =====
         if not distance_ok:
-            # ===== 距离控制 =====
-            linear_vel = -1 * np.clip(-self.kp_linear * distance_error,
-                                 -self.max_linear_speed, self.max_linear_speed)
-            # 可选：最小线速度，用于排除固件死区（若狗收到 Move 但不走可试 0.12~0.15）
-            if self.min_linear_speed > 0 and linear_vel != 0:
-                sign = 1 if linear_vel > 0 else -1
-                abs_vel = min(self.max_linear_speed, max(abs(linear_vel), self.min_linear_speed))
-                linear_vel = sign * abs_vel
+            # ===== 距离控制 - 关键：确保速度足够大 =====
+            # 计算基础速度
+            raw_vel = -self.kp_linear * distance_error
+            # 限幅到最大速度
+            linear_vel = np.clip(raw_vel, -self.max_linear_speed, self.max_linear_speed)
+            
+            # ===== 关键修复：确保速度不低于最小速度 =====
+            # 如果计算出的速度太小，固件会认为是倾斜而不是移动
+            if linear_vel != 0:
+                # 取绝对值的最小速度（排除死区）
+                min_speed = max(self.min_linear_speed, 0.1)  # 至少0.1否则不动
+                if abs(linear_vel) < min_speed:
+                    sign = 1 if linear_vel > 0 else -1
+                    linear_vel = sign * min_speed
 
             rospy.loginfo(
                 f"[Go2 SDK] 距离控制: distance={distance:.3f}m, target={self.target_distance:.3f}m, "
-                f"error={distance_error:.3f}m, vx={linear_vel:.3f} m/s, 预估持续{self.estimated_duration:.1f}s"
+                f"error={distance_error:.3f}m, vx={linear_vel:.3f} m/s"
             )
-
-            # ===== 每次运动前重新调用 ClassicWalk(True) - 业界最佳实践 =====
-            # 发现目标后首次 Move 时机器人易切回激进步态，运动前重新施加柔和步态
-            self._set_gentle_gait(quiet=True, throttle_interval=1.5)
-
+            
+            # ===== 每次运动前重新设置步态 - 关键！=====
+            self._set_gentle_gait(quiet=True, throttle_interval=1.0)
+            
             # 记录运动类型与等待期间要持续发送的速度
             self.motion_type = "move_forward" if linear_vel > 0 else "move_backward"
             self._waiting_vx = float(linear_vel)
             self._waiting_vy = 0.0
             self._waiting_vyaw = 0.0
-
-            # 下发命令并进入等待状态（等待期间每周期会继续发送同一速度）
+            
+            # 下发命令
             self.sport_client.Move(linear_vel, 0.0, 0.0)
             self.motion_state = MotionState.WAITING
             self.motion_start_time = time.time()
             rospy.loginfo(
-                "[Go2 SDK] 已下发 Move(vx=%.3f, vy=0, vyaw=0)；若狗仍不动: 1) 检查 APP sport_mode/避障/遥控器 2) 试 params 中 min_linear_speed=0.12~0.15 排除死区",
+                "[Go2 SDK] >>> 下发 Move(vx=%.3f, vy=0, vyaw=0)",
                 linear_vel,
             )
-
+            
         elif not angle_ok:
             # ===== 角度控制 =====
             angular_vel = np.clip(-self.kp_angular * np.radians(angle_error),
                                   -self.max_angular_speed, self.max_angular_speed)
-
+            
             rospy.loginfo(
-                f"[Go2 SDK] 角度控制: yaw_err={angle_error:.2f}deg, wz={angular_vel:.3f} rad/s, "
-                f"预估持续{self.estimated_duration:.1f}s"
+                f"[Go2 SDK] 角度控制: yaw_err={angle_error:.2f}deg, wz={angular_vel:.3f} rad/s"
             )
-
-            # ===== 每次运动前重新调用 ClassicWalk(True) - 业界最佳实践 =====
-            # 运动前重新施加柔和步态，避免切回激进
-            self._set_gentle_gait(quiet=True, throttle_interval=1.5)
-
+            
+            # 每次运动前重新设置步态
+            self._set_gentle_gait(quiet=True, throttle_interval=1.0)
+            
             # 记录运动类型与等待期间要持续发送的角速度
             self.motion_type = "rotate_right" if angular_vel > 0 else "rotate_left"
             self._waiting_vx = 0.0
             self._waiting_vy = 0.0
             self._waiting_vyaw = float(angular_vel)
-
-            # 下发命令并进入等待状态（等待期间每周期会继续发送同一角速度）
+            
+            # 下发命令
             self.sport_client.Move(0.0, 0.0, angular_vel)
             self.motion_state = MotionState.WAITING
             self.motion_start_time = time.time()
-            rospy.loginfo("[Go2 SDK] 已下发 Move(vx=0, vy=0, vyaw=%.3f)", angular_vel)
-
+            rospy.loginfo("[Go2 SDK] >>> 下发 Move(vx=0, vy=0, vyaw=%.3f)", angular_vel)
+        
         # 返回 None 表示已通过 SDK 发送指令
         return None
 
