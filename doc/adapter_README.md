@@ -306,3 +306,66 @@ pose_adapter **默认从话题 `/camera/image_raw` 获取图像**，与 `src/cal
 - **响应时间**：<200 ms，快速调节到位。
 - **定位精度**：距离误差 <5 cm，角度误差 <1°（依赖标定与电表尺寸）。
 - **读数成功率**：正常光照下 >95%。
+
+---
+
+## 机器狗运动控制最佳实践（基于业界开源方案）
+
+参考项目：
+- [unitree_sdk2_python](https://github.com/unitreerobotics/unitree_sdk2_python) - 官方SDK
+- [go2_ros2_sdk](https://github.com/abizovnuralem/go2_ros2_sdk) - ROS2完整SDK
+- [autonomy_stack_go2](https://github.com/jizhang-cmu/autonomy_stack_go2) - 完整自主导航栈
+
+### 控制模式
+
+| 模式 | 说明 | 适用场景 |
+|------|------|----------|
+| **Velocity + Time** | 固定速度发送Move命令，根据距离计算时间 | 精确距离/角度控制（本项目使用） |
+| **TrajectoryFollow** | 轨迹跟踪模式 | 复杂路径规划 |
+| **Waypoint Navigation** | 路点导航+避障 | 自主导航到目标点 |
+
+### 关键要点
+
+1. **确保机器狗就绪**
+   ```python
+   # 正确的初始化流程
+   sport_client.BalanceStand()  # 进入平衡站立
+   rospy.sleep(2.0)
+   sport_client.Move(0, 0, 0)   # 触发进入运动模式 (mode 9)
+   ```
+
+2. **关闭避障**
+   ```python
+   from unitree_sdk2py.go2.obstacles_avoid.obstacles_avoid_client import ObstaclesAvoidClient
+   client = ObstaclesAvoidClient()
+   client.Init()
+   client.SwitchSet(False)  # 关闭避障
+   ```
+
+3. **速度阈值**
+   - 线速度需 > 0.1 m/s，否则固件认为是身体倾斜
+   - 推荐速度：0.1-0.15 m/s
+
+4. **步态选择**
+   - `ClassicWalk(True)`: 经典步态（稀碎步），更柔和
+   - `SpeedLevel(-1)`: 慢速档，适合精确控制
+
+### 精确控制实现
+
+```python
+def move_distance(sport_client, distance_m, speed=0.1):
+    """前进指定距离"""
+    duration = abs(distance_m) / speed
+    vx = speed if distance_m > 0 else -speed
+    sport_client.Move(vx, 0, 0)
+    rospy.sleep(duration)
+    sport_client.StopMove()
+
+def turn_angle(sport_client, angle_deg, angular_speed=0.2):
+    """旋转指定角度"""
+    duration = abs(np.radians(angle_deg)) / angular_speed
+    vyaw = angular_speed if angle_deg > 0 else -angular_speed
+    sport_client.Move(0, 0, vyaw)
+    rospy.sleep(duration)
+    sport_client.StopMove()
+```

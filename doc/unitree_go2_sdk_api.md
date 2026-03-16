@@ -36,24 +36,34 @@
 | `WalkUpright(flag: bool)` | 直立行走 |
 | `CrossStep(flag: bool)` | 交叉步 |
 
-### 1.3 其他
+### 1.3 业界控制做法（参考 autonomy_stack_go2 和官方SDK）
 
-| 方法 | 说明 |
-|------|------|
-| `Sit()` | 坐下 |
-| `RiseSit()` | 从坐姿站起 |
-| `SwitchJoystick(on: bool)` | 切换摇杆控制权 |
-| `Pose(flag: bool)` | 姿态模式 |
-| `SwitchAvoidMode()` | 切换避障模式（Sport 内） |
-| `AutoRecoverySet(enabled: bool)` | 自动恢复开关 |
-| `AutoRecoveryGet()` | 查询自动恢复状态 |
-| `Hello()` / `Stretch()` / `Content()` | 打招呼、伸懒腰、满足 |
-| `Dance1()` / `Dance2()` | 舞蹈 |
-| `Scrape()` / `FrontFlip()` / `FrontJump()` / `FrontPounce()` | 扒地、前空翻、前跳、前扑 |
-| `Heart()` / `LeftFlip()` / `BackFlip()` / `HandStand()` | 比心、左翻、后空翻、倒立 |
-| `FreeAvoid(flag: bool)` | 自由避障开关 |
+**精确距离/角度控制方案**：
 
-**PoseAdapter 与经典步态**：若希望由代码切到经典步态（稀碎步），可在 SportClient 初始化并 BalanceStand 后调用 `sport_client.ClassicWalk(True)`。
+```python
+# 基于速度+时间控制（推荐）
+def move_distance(distance_m, speed=0.1):
+    """前进指定距离"""
+    duration = abs(distance_m) / speed
+    vx = speed if distance_m > 0 else -speed
+    sport_client.Move(vx, 0, 0)
+    rospy.sleep(duration)
+    sport_client.StopMove()
+
+def turn_angle(angle_deg, angular_speed=0.2):
+    """旋转指定角度"""
+    duration = abs(np.radians(angle_deg)) / angular_speed
+    vyaw = angular_speed if angle_deg > 0 else -angular_speed
+    sport_client.Move(0, 0, vyaw)
+    rospy.sleep(duration)
+    sport_client.StopMove()
+```
+
+**关键要点**：
+1. **确保机器狗就绪**：先调用 `BalanceStand()` 再调用 `Move(0,0,0)` 进入运动模式 (mode 9)
+2. **关闭避障**：使用 `ObstaclesAvoidClient.SwitchSet(False)`
+3. **持续发送命令**：Go2 需要持续接收 Move 命令才能保持运动（部分固件版本）
+4. **速度阈值**：速度需 > 0.1 m/s 否则固件认为是身体倾斜
 
 ---
 

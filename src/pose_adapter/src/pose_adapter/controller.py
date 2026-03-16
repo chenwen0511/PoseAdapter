@@ -829,7 +829,13 @@ class MotionController:
 
     def move_forward_distance(self, distance_m, timeout=10.0):
         """
-        前进指定距离（米）
+        前进指定距离（米）- 基于速度+时间控制
+        
+        业界通用做法（参考Unitree官方SDK和autonomy_stack_go2）：
+        1. 先确保机器狗处于运动模式（BalanceStand + Move(0,0,0)）
+        2. 使用固定速度发送Move命令
+        3. 根据距离和速度计算移动时间
+        4. 等待移动完成
         
         Args:
             distance_m: 前进距离（米），正值前进，负值后退
@@ -841,36 +847,47 @@ class MotionController:
         if not self.use_high_level_sdk or not self.sport_client:
             return True
         
-        rospy.loginfo(f"[精确控制] 前进 {distance_m*100:.1f}cm")
+        direction = "前进" if distance_m > 0 else "后退"
+        rospy.loginfo(f"[精确控制] {direction} {abs(distance_m)*100:.1f}cm")
         
-        # 使用速度控制，计算时间
-        speed = max(self.min_linear_speed, 0.15)  # 至少0.15 m/s
+        # 确保机器人就绪
+        if not self.ensure_robot_ready():
+            rospy.logwarn("[精确控制] 机器人未就绪，无法移动")
+            return False
+        
+        # 使用保守的固定速度（参考业界做法）
+        speed = max(0.1, min(self.max_linear_speed, 0.15))  # 0.1-0.15 m/s
         duration = abs(distance_m) / speed
         
         # 限制最大时间
         duration = min(duration, timeout)
         
         # 确定方向
-        direction = 1 if distance_m > 0 else -1
-        vx = direction * speed
+        vx = speed if distance_m > 0 else -speed
         
         rospy.loginfo(f"[精确控制] 速度 {vx:.3f}m/s, 预计时间 {duration:.2f}s")
         
         # 发送运动命令
         self.sport_client.Move(vx, 0.0, 0.0)
         
-        # 等待指定时间
+        # 等待指定时间（基于速度计算）
         rospy.sleep(duration)
         
         # 停止
         self.sport_client.StopMove()
-        rospy.loginfo(f"[精确控制] 前进完成，实际移动约 {speed * duration:.3f}m")
+        actual_distance = speed * duration
+        rospy.loginfo(f"[精确控制] {direction}完成，实际移动约 {actual_distance*100:.1f}cm")
         
         return True
 
     def turn_angle(self, angle_deg, timeout=10.0):
         """
-        旋转指定角度（度）
+        旋转指定角度（度）- 基于角速度+时间控制
+        
+        业界通用做法：
+        1. 使用固定角速度发送Move命令
+        2. 根据角度和角速度计算旋转时间
+        3. 等待旋转完成
         
         Args:
             angle_deg: 旋转角度（度），正值左转，负值右转
@@ -882,18 +899,23 @@ class MotionController:
         if not self.use_high_level_sdk or not self.sport_client:
             return True
         
-        rospy.loginfo(f"[精确控制] 旋转 {angle_deg:.1f}度")
+        direction = "左转" if angle_deg > 0 else "右转"
+        rospy.loginfo(f"[精确控制] {direction} {abs(angle_deg):.1f}度")
         
-        # 使用角速度控制，计算时间
-        angular_speed = min(self.max_angular_speed, 0.25)  # 最大0.25 rad/s
+        # 确保机器人就绪
+        if not self.ensure_robot_ready():
+            rospy.logwarn("[精确控制] 机器人未就绪，无法旋转")
+            return False
+        
+        # 使用固定的角速度
+        angular_speed = min(self.max_angular_speed, 0.2)  # 0.2 rad/s
         duration = abs(np.radians(angle_deg)) / angular_speed
         
         # 限制最大时间
         duration = min(duration, timeout)
         
         # 确定方向
-        direction = 1 if angle_deg > 0 else -1
-        vyaw = direction * angular_speed
+        vyaw = angular_speed if angle_deg > 0 else -angular_speed
         
         rospy.loginfo(f"[精确控制] 角速度 {vyaw:.3f}rad/s, 预计时间 {duration:.2f}s")
         
@@ -905,7 +927,8 @@ class MotionController:
         
         # 停止
         self.sport_client.StopMove()
-        rospy.loginfo(f"[精确控制] 旋转完成，实际旋转约 {angular_speed * duration:.3f}rad = {np.degrees(angular_speed * duration):.1f}度")
+        actual_angle = np.degrees(angular_speed * duration)
+        rospy.loginfo(f"[精确控制] {direction}完成，实际旋转约 {actual_angle:.1f}度")
         
         return True
 
