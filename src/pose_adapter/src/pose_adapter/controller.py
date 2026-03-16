@@ -665,7 +665,7 @@ class MotionController:
             # error > 0: 太远 → 需要后退 (负速度)
             # error < 0: 太近 → 需要前进 (正速度)
             # 所以需要取反：-kp * error
-            raw_vel = -self.kp_linear * distance_error
+            raw_vel = self.kp_linear * distance_error
             # 限幅到最大速度
             linear_vel = np.clip(raw_vel, -self.max_linear_speed, self.max_linear_speed)
             
