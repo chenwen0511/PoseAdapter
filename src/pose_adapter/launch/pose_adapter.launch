@@ -16,7 +16,7 @@
   <arg name="meter_height" default="0.3"/>  <!-- 电表物理高度（米）-->
 
   <!-- 控制参数 -->
-  <arg name="target_distance" default="1.7"/> <!-- 直接控制"离电表多远"，当前逻辑在用 -->
+  <arg name="target_distance" default="0.3"/> <!-- 直接控制"离电表多远"，当前逻辑在用 -->
   <arg name="distance_tolerance" default="0.05"/> <!-- 距离容差（米），越小越"抠细节" -->
   <arg name="target_ratio" default="0.5"/> <!-- 画面占比，表示"目标画面占比"，已作为参数传入，但当前控制逻辑里还没参与判断，只占位备用。 -->
 

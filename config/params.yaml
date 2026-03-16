@@ -12,7 +12,7 @@ meter:
 
 # 控制参数（步态偏柔和：降低速度与增益，减轻激进僵硬）
 control:
-  target_distance: 1.7      # 目标距离（米）
+  target_distance: 0.3      # 目标距离（米）
   target_ratio: 0.65        # 目标画面占比
   distance_tolerance: 0.05  # 距离容差
   angle_tolerance: 2.0      # 角度容差（度）

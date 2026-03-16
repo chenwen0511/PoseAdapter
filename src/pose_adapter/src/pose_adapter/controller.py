@@ -31,7 +31,7 @@ class MotionController:
     """
 
     def __init__(self,
-                 target_distance=1.7,      # 目标距离（米）
+                 target_distance=0.3,      # 目标距离（米）
                  target_ratio=0.65,         # 目标画面占比
                  distance_tolerance=0.05,   # 距离容差（米）
                  angle_tolerance=2.0,       # 角度容差（度）
