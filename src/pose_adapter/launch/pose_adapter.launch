@@ -41,8 +41,8 @@
   <!-- 步态：use_classic_walk=true 时稀碎步；false 时用默认步态便于走步。speed_level：-1=慢 0=普通 1=快 -->
   <arg name="use_classic_walk" default="false"/>
   <arg name="speed_level" default="0"/>
-  <arg name="max_linear_speed" default="0.12"/>
-  <arg name="min_linear_speed" default="0.12"/>
+  <arg name="max_linear_speed" default="0.2"/>
+  <arg name="min_linear_speed" default="0.15"/>
   <arg name="max_angular_speed" default="0.25"/>
 
   <!-- Pose Adapter 主节点 -->
