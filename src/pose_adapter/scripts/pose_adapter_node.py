@@ -65,6 +65,11 @@ class PoseAdapterNode:
         self.ocr_result = None
         self._frame_count = 0  # 用于节流调试图像
         
+        # 防死循环计数器
+        self._consecutive_timeouts = 0  # 连续超时次数
+        self._max_consecutive_timeouts = 3  # 最大连续超时次数，超过后暂停
+        self._pause_duration = 2.0  # 超时时暂停秒数
+        
         # 使用 Unitree SDK2 VideoClient 初始化 Go2 前置相机
         if self.use_go2_camera:
             self._init_camera()
@@ -606,8 +611,18 @@ class PoseAdapterNode:
             motion_complete = self.controller.wait_for_motion_complete()
             if motion_complete:
                 rospy.loginfo("[Pipeline] 运动执行完成")
+                self._consecutive_timeouts = 0  # 成功后重置计数器
             else:
                 rospy.logwarn("[Pipeline] 运动执行超时")
+                self._consecutive_timeouts += 1
+                rospy.logwarn(f"[Pipeline] 连续超时次数: {self._consecutive_timeouts}/{self._max_consecutive_timeouts}")
+                
+                # 超过最大连续超时次数，暂停并重置
+                if self._consecutive_timeouts >= self._max_consecutive_timeouts:
+                    rospy.logerr(f"[Pipeline] 连续超时{self._max_consecutive_timeouts}次，暂停{self._pause_duration}秒并停止运动")
+                    self.controller.stop()
+                    rospy.sleep(self._pause_duration)
+                    self._consecutive_timeouts = 0  # 重置计数器
             
             # 检查是否到位，准备OCR
             if self.controller.is_ready_for_ocr():
