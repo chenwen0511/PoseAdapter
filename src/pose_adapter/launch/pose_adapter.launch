@@ -1,6 +1,6 @@
 <launch>
   <!-- Pose Adapter - 电表巡检主节点 -->
-  
+
   <!-- 相机参数 -->
   <arg name="camera_width" default="1280"/>
   <arg name="camera_height" default="720"/>
@@ -10,19 +10,19 @@
 
   <!-- Go2 网络接口：留空则自动检测；eth0 不可用时可用 eth1 -->
   <arg name="network_interface" default="eth1"/>
-  
+
   <!-- 电表尺寸（米） -->
   <arg name="meter_width" default="0.1"/>
   <arg name="meter_height" default="0.15"/>
-  
+
   <!-- 控制参数 -->
-  <arg name="target_distance" default="0.3"/> <!-- 直接控制“离电表多远”，当前逻辑在用 -->
-  <arg name="distance_tolerance" default="0.05"/> <!-- 距离容差（米），越小越“抠细节” -->
-  <arg name="target_ratio" default="0.5"/> <!-- 画面占比，表示“目标画面占比”，已作为参数传入，但当前控制逻辑里还没参与判断，只占位备用。 -->
+  <arg name="target_distance" default="1.7"/> <!-- 直接控制"离电表多远"，当前逻辑在用 -->
+  <arg name="distance_tolerance" default="0.05"/> <!-- 距离容差（米），越小越"抠细节" -->
+  <arg name="target_ratio" default="0.5"/> <!-- 画面占比，表示"目标画面占比"，已作为参数传入，但当前控制逻辑里还没参与判断，只占位备用。 -->
 
   <!-- 低算力：主循环 Hz，默认 5 以降低 CPU（高算力可设 10-20） -->
   <arg name="loop_hz" default="5"/>
-  
+
   <!-- 模型路径：留空使用备用检测（无 PyTorch）；指定路径则用 YOLOv8 -->
   <arg name="yolo_model_path" default="/home/unitree/stephen/PoseAdapter/model/best.pt"/>
   <!-- 低算力设备建议 false，PaddleOCR 易引起段错误 -->
@@ -32,19 +32,19 @@
 
   <!-- 图像来源：与 calibrate 一致，默认 /camera/image_raw（由其他节点发布相机 raw 图） -->
   <arg name="camera_image_topic" default="/camera/image_raw"/>
-  
+
   <!-- 标定文件：留空则使用节点内默认内参；指定路径则从文件加载（如 $(find pose_adapter)/config/default_camera_calib.yaml） -->
   <arg name="calib_file" default=""/>
-  
+
   <!-- 运动前提：关闭避障 + 经典步态。SDK 支持时启动是否尝试关闭避障（未支持时请 APP 或 ros2 go2 obstacles_avoidance stop） -->
   <arg name="disable_obstacle_avoidance_on_start" default="true"/>
-  <!-- 步态：use_classic_walk=true 时稀碎步（部分固件下 Move 可能不迈步）；false 时用默认步态便于真正走步。speed_level：-1=慢 0=普通 1=快 -->
-  <arg name="use_classic_walk" default="false"/>
-  <arg name="speed_level" default="0"/>
+  <!-- 步态：use_classic_walk=true 时稀碎步（更柔和，适合近距离调整）；false 时用默认步态便于走步。speed_level：-1=慢 0=普通 1=快 -->
+  <arg name="use_classic_walk" default="true"/>
+  <arg name="speed_level" default="-1"/>
   <arg name="max_linear_speed" default="0.12"/>
   <arg name="min_linear_speed" default="0"/>
   <arg name="max_angular_speed" default="0.25"/>
-  
+
   <!-- Pose Adapter 主节点 -->
   <node name="pose_adapter" pkg="pose_adapter" type="pose_adapter_node.py" output="screen">
     <param name="camera_width" value="$(arg camera_width)"/>
@@ -69,7 +69,7 @@
     <param name="min_linear_speed" value="$(arg min_linear_speed)"/>
     <param name="max_angular_speed" value="$(arg max_angular_speed)"/>
   </node>
-  
+
   <!-- 图像查看（可选，无显示器时需设为 false） -->
   <arg name="show_debug_image" default="false"/>
   <group if="$(arg show_debug_image)">
@@ -77,5 +77,5 @@
       <remap from="image" to="/pose_adapter/debug_image"/>
     </node>
   </group>
-  
+
 </launch>

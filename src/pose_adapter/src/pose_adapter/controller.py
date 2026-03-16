@@ -663,7 +663,10 @@ class MotionController:
         if not distance_ok:
             # ===== 距离控制 - 关键：确保速度足够大 =====
             # 计算基础速度
-            raw_vel = -self.kp_linear * distance_error
+            # 注意：Go2机体坐标系中，vx > 0 是前进，vx < 0 是后退
+            # 当 distance > target_distance (太远) 时，应该前进 (正速度)
+            # 当 distance < target_distance (太近) 时，应该后退 (负速度)
+            raw_vel = self.kp_linear * distance_error
             # 限幅到最大速度
             linear_vel = np.clip(raw_vel, -self.max_linear_speed, self.max_linear_speed)
             
@@ -796,8 +799,10 @@ class MotionController:
         self.estimated_duration = self._estimate_motion_duration(distance_error, angle_error)
 
         # 距离控制
+        # 注意：cmd_vel中 x > 0 是前进，x < 0 是后退
+        # 当 distance > target_distance (太远) 时，应该前进 (正速度)
         if not distance_ok:
-            linear_vel = -self.kp_linear * distance_error
+            linear_vel = self.kp_linear * distance_error
             linear_vel = np.clip(linear_vel, -self.max_linear_speed, self.max_linear_speed)
             cmd.linear.x = linear_vel
 
