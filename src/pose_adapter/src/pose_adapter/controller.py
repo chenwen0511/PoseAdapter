@@ -629,29 +629,34 @@ class MotionController:
         
         # 优先处理角度偏差
         if not angle_ok:
-            # 需要旋转
-            turn_deg = self.step_angle if angle_error > 0 else -self.step_angle  # 每次转step_angle度
-            # 限制最大角度
-            if abs(angle_error) < 5:
-                turn_deg = angle_error
+            # 根据实际误差计算旋转角度（限制在最大步长内）
+            turn_deg = angle_error
+            if abs(turn_deg) > self.step_angle:
+                turn_deg = self.step_angle if turn_deg > 0 else -self.step_angle
             
-            rospy.loginfo(f"[精确控制] 旋转 {turn_deg}度 (当前偏航{angle_error:.1f}度)")
+            rospy.loginfo(f"[精确控制] 旋转 {turn_deg:.1f}度 (误差{angle_error:.1f}度)")
             self.turn_angle(turn_deg, timeout=3.0)
             self.is_positioned = False
             return None
         
         # 处理距离偏差
-        if not distance_error > 0:
+        if distance_error > 0:
             # 距离太远，需要前进
-            move_dist = min(self.step_distance, distance_error)  # 每次最多前进step_distance
-            rospy.loginfo(f"[精确控制] 前进 {move_dist*100:.1f}cm (当前距离{distance:.3f}m)")
+            move_dist = distance_error
+            # 限制最大步长
+            if move_dist > self.step_distance:
+                move_dist = self.step_distance
+            rospy.loginfo(f"[精确控制] 前进 {move_dist*100:.1f}cm (误差{distance_error*100:.1f}cm, 当前距离{distance:.3f}m)")
             self.move_forward_distance(move_dist, timeout=5.0)
             self.is_positioned = False
             return None
         else:
             # 距离太近，需要后退
-            move_dist = max(-self.step_distance, distance_error)  # 每次最多后退step_distance
-            rospy.loginfo(f"[精确控制] 后退 {abs(move_dist)*100:.1f}cm (当前距离{distance:.3f}m)")
+            move_dist = distance_error  # 已经是负数
+            # 限制最大步长
+            if abs(move_dist) > self.step_distance:
+                move_dist = -self.step_distance
+            rospy.loginfo(f"[精确控制] 后退 {abs(move_dist)*100:.1f}cm (误差{abs(distance_error)*100:.1f}cm, 当前距离{distance:.3f}m)")
             self.move_forward_distance(move_dist, timeout=5.0)
             self.is_positioned = False
             return None
