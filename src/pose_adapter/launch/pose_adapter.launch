@@ -12,8 +12,8 @@
   <arg name="network_interface" default="eth1"/>
 
   <!-- 电表尺寸（米） -->
-  <arg name="meter_width" default="0.1"/>
-  <arg name="meter_height" default="0.15"/>
+  <arg name="meter_width" default="0.2"/>   <!-- 电表物理宽度（米）-->
+  <arg name="meter_height" default="0.3"/>  <!-- 电表物理高度（米）-->
 
   <!-- 控制参数 -->
   <arg name="target_distance" default="1.7"/> <!-- 直接控制"离电表多远"，当前逻辑在用 -->
