@@ -94,6 +94,7 @@ class MotionController:
         self.is_positioned = False
         self.positioned_count = 0
         self.positioned_threshold = 10  # 连续多少帧达标才算到位
+        self._last_distance_error = 0.0  # 用于诊断
 
         # 运动状态机（解决控制频率问题）
         self.motion_state = MotionState.IDLE
@@ -829,6 +830,9 @@ class MotionController:
 
     def _check_positioned(self, distance_error, angle_error, offset_x):
         """检查是否已经到位"""
+        # 保存用于诊断
+        self._last_distance_error = distance_error
+        
         distance_ok = abs(distance_error) <= self.distance_tolerance
         angle_ok = abs(angle_error) <= self.angle_tolerance
         center_ok = abs(offset_x) <= self.center_tolerance
@@ -904,14 +908,21 @@ class MotionController:
 
         rospy.loginfo(f"[Motion] 开始等待运动完成，超时: {timeout}s")
         start_time = time.time()
+        last_diag_time = 0
 
         while self.motion_state == MotionState.WAITING and self.is_running:
             # 检查超时
             elapsed = time.time() - start_time
             if elapsed > timeout:
-                rospy.logwarn(f"[Motion] 等待运动完成超时 ({elapsed:.1f}s)")
+                rospy.logwarn(f"[Motion] 等待运动完成超时 ({elapsed:.1f}s), distance_error={self._last_distance_error:.3f}, is_positioned={self.is_positioned}, positioned_count={self.positioned_count}")
                 self._reset_motion_state()
                 return False
+
+            # 每2秒打印一次诊断信息
+            if elapsed - last_diag_time > 2.0:
+                last_diag_time = elapsed
+                self._update_robot_state()
+                rospy.loginfo(f"[Motion] 诊断: mode={getattr(self.robot_state, 'mode', 'N/A')}, gait={getattr(self.robot_state, 'gait_status', 'N/A')}, is_standing={self.is_robot_standing}, is_unlocked={self.is_robot_unlocked}")
 
             # 检查是否到位
             if self.is_positioned:
