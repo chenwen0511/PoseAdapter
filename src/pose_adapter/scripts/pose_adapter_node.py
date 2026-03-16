@@ -567,6 +567,13 @@ class PoseAdapterNode:
         
         rospy.loginfo(f"[Pipeline] === 步骤3: 追踪完成，{len(self.current_tracks)} 个追踪 ===")
         
+        # 无目标时降低循环频率，保护机器人
+        if len(self.current_tracks) == 0:
+            rospy.logwarn_throttle(2.0, "[Pipeline] 无目标，原地等待并降低频率")
+            self.controller.stop()
+            rospy.sleep(0.5)  # 无目标时暂停0.5秒
+            return
+        
         # 发布调试图像
         self._publish_debug_image(cv_image)
         
@@ -583,6 +590,7 @@ class PoseAdapterNode:
                 rospy.logwarn("[Pipeline] 丢失目标，尝试重新检测...")
                 self.target_track_id = None
                 self.controller.stop()
+                rospy.sleep(0.5)  # 丢失目标时暂停0.5秒
                 return
             
             _, bbox, conf = target_track
