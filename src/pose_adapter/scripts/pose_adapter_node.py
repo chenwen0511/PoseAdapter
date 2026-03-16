@@ -128,6 +128,9 @@ class PoseAdapterNode:
         self.max_linear_speed = rospy.get_param('~max_linear_speed', 0.12)
         self.min_linear_speed = rospy.get_param('~min_linear_speed', 0.0)
         self.max_angular_speed = rospy.get_param('~max_angular_speed', 0.25)
+        # 步长参数
+        self.step_distance = rospy.get_param('~step_distance', 0.2)  # 米
+        self.step_angle = rospy.get_param('~step_angle', 5.0)       # 度
 
         # 图像话题（与 calibrate 一致默认 /camera/image_raw；由其他节点发布相机 raw）
         self.camera_image_topic = rospy.get_param('~camera_image_topic', '/camera/image_raw')
@@ -242,6 +245,8 @@ class PoseAdapterNode:
             max_linear_speed=self.max_linear_speed,
             min_linear_speed=self.min_linear_speed,
             max_angular_speed=self.max_angular_speed,
+            step_distance=self.step_distance,
+            step_angle=self.step_angle,
             use_high_level_sdk=self.use_high_level_sdk,
             interface_name=self.network_interface if self.network_interface else "eth1",
             disable_obstacle_avoidance_on_start=self.disable_obstacle_avoidance_on_start,

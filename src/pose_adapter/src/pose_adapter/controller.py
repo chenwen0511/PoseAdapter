@@ -39,6 +39,8 @@ class MotionController:
                  max_linear_speed=0.12,     # 最大线速度（m/s）
                  min_linear_speed=0.12,     # 最小线速度（m/s）；必须>0.1才能避免固件死区
                  max_angular_speed=0.25,    # 最大角速度（rad/s）
+                 step_distance=0.2,         # 每次移动步长（米），默认20cm
+                 step_angle=5.0,            # 每次旋转步长（度），默认5度
                  use_high_level_sdk=False,  # 是否使用 high_level SDK
                  interface_name="eth0",    # 网络接口名称
                  disable_obstacle_avoidance_on_start=True,  # 启动时是否尝试关闭避障
@@ -69,6 +71,9 @@ class MotionController:
         self.max_linear_speed = max_linear_speed
         self.min_linear_speed = min_linear_speed
         self.max_angular_speed = max_angular_speed
+        # 步长参数（每次移动/旋转的步长）
+        self.step_distance = step_distance  # 米，默认0.2m=20cm
+        self.step_angle = step_angle        # 度，默认5度
         self.use_high_level_sdk = use_high_level_sdk
         self.interface_name = interface_name
         self.disable_obstacle_avoidance_on_start = disable_obstacle_avoidance_on_start
@@ -625,7 +630,7 @@ class MotionController:
         # 优先处理角度偏差
         if not angle_ok:
             # 需要旋转
-            turn_deg = 5 if angle_error > 0 else -5  # 每次转5度
+            turn_deg = self.step_angle if angle_error > 0 else -self.step_angle  # 每次转step_angle度
             # 限制最大角度
             if abs(angle_error) < 5:
                 turn_deg = angle_error
@@ -638,14 +643,14 @@ class MotionController:
         # 处理距离偏差
         if not distance_error > 0:
             # 距离太远，需要前进
-            move_dist = min(0.2, distance_error)  # 每次最多前进20cm
+            move_dist = min(self.step_distance, distance_error)  # 每次最多前进step_distance
             rospy.loginfo(f"[精确控制] 前进 {move_dist*100:.1f}cm (当前距离{distance:.3f}m)")
             self.move_forward_distance(move_dist, timeout=5.0)
             self.is_positioned = False
             return None
         else:
             # 距离太近，需要后退
-            move_dist = max(-0.2, distance_error)  # 每次最多后退20cm
+            move_dist = max(-self.step_distance, distance_error)  # 每次最多后退step_distance
             rospy.loginfo(f"[精确控制] 后退 {abs(move_dist)*100:.1f}cm (当前距离{distance:.3f}m)")
             self.move_forward_distance(move_dist, timeout=5.0)
             self.is_positioned = False

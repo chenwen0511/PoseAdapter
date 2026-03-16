@@ -44,6 +44,9 @@
   <arg name="max_linear_speed" default="0.2"/>
   <arg name="min_linear_speed" default="0.15"/>
   <arg name="max_angular_speed" default="0.25"/>
+  <!-- 步长参数 -->
+  <arg name="step_distance" default="0.2"/>  <!-- 每次移动步长（米），默认20cm -->
+  <arg name="step_angle" default="5.0"/>     <!-- 每次旋转步长（度），默认5度 -->
 
   <!-- Pose Adapter 主节点 -->
   <node name="pose_adapter" pkg="pose_adapter" type="pose_adapter_node.py" output="screen">
@@ -68,6 +71,8 @@
     <param name="max_linear_speed" value="$(arg max_linear_speed)"/>
     <param name="min_linear_speed" value="$(arg min_linear_speed)"/>
     <param name="max_angular_speed" value="$(arg max_angular_speed)"/>
+    <param name="step_distance" value="$(arg step_distance)"/>
+    <param name="step_angle" value="$(arg step_angle)"/>
   </node>
 
   <!-- 图像查看（可选，无显示器时需设为 false） -->
