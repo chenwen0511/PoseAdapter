@@ -884,6 +884,88 @@ class MotionController:
             self.sport_client.BalanceStand()
             rospy.loginfo("平衡站立 (SDK)")
 
+    def move_forward_distance(self, distance_m, timeout=10.0):
+        """
+        前进指定距离（米）
+        
+        Args:
+            distance_m: 前进距离（米），正值前进，负值后退
+            timeout: 超时时间（秒）
+            
+        Returns:
+            bool: True 表示运动完成
+        """
+        if not self.use_high_level_sdk or not self.sport_client:
+            return True
+        
+        rospy.loginfo(f"[精确控制] 前进 {distance_m*100:.1f}cm")
+        
+        # 使用速度控制，计算时间
+        speed = max(self.min_linear_speed, 0.15)  # 至少0.15 m/s
+        duration = abs(distance_m) / speed
+        
+        # 限制最大时间
+        duration = min(duration, timeout)
+        
+        # 确定方向
+        direction = 1 if distance_m > 0 else -1
+        vx = direction * speed
+        
+        rospy.loginfo(f"[精确控制] 速度 {vx:.3f}m/s, 预计时间 {duration:.2f}s")
+        
+        # 发送运动命令
+        self.sport_client.Move(vx, 0.0, 0.0)
+        
+        # 等待指定时间
+        rospy.sleep(duration)
+        
+        # 停止
+        self.sport_client.StopMove()
+        rospy.loginfo(f"[精确控制] 前进完成，实际移动约 {speed * duration:.3f}m")
+        
+        return True
+
+    def turn_angle(self, angle_deg, timeout=10.0):
+        """
+        旋转指定角度（度）
+        
+        Args:
+            angle_deg: 旋转角度（度），正值左转，负值右转
+            timeout: 超时时间（秒）
+            
+        Returns:
+            bool: True 表示旋转完成
+        """
+        if not self.use_high_level_sdk or not self.sport_client:
+            return True
+        
+        rospy.loginfo(f"[精确控制] 旋转 {angle_deg:.1f}度")
+        
+        # 使用角速度控制，计算时间
+        angular_speed = min(self.max_angular_speed, 0.25)  # 最大0.25 rad/s
+        duration = abs(np.radians(angle_deg)) / angular_speed
+        
+        # 限制最大时间
+        duration = min(duration, timeout)
+        
+        # 确定方向
+        direction = 1 if angle_deg > 0 else -1
+        vyaw = direction * angular_speed
+        
+        rospy.loginfo(f"[精确控制] 角速度 {vyaw:.3f}rad/s, 预计时间 {duration:.2f}s")
+        
+        # 发送旋转命令
+        self.sport_client.Move(0.0, 0.0, vyaw)
+        
+        # 等待指定时间
+        rospy.sleep(duration)
+        
+        # 停止
+        self.sport_client.StopMove()
+        rospy.loginfo(f"[精确控制] 旋转完成，实际旋转约 {angular_speed * duration:.3f}rad = {np.degrees(angular_speed * duration):.1f}度")
+        
+        return True
+
     def wait_for_motion_complete(self, timeout=None):
         """
         等待运动执行完成（同步阻塞）
