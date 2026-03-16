@@ -7,8 +7,8 @@ camera:
 
 # 电表物理尺寸（米）
 meter:
-  width: 0.2
-  height: 0.3
+  width: 0.1
+  height: 0.15
 
 # 控制参数（步态偏柔和：降低速度与增益，减轻激进僵硬）
 control:
