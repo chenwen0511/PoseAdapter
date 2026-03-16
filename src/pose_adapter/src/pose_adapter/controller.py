@@ -589,23 +589,16 @@ class MotionController:
 
     def _compute_high_level_control(self, distance, yaw, offset_x):
         """
-        使用 high_level SDK 计算控制指令
+        使用精确控制方法计算控制指令
         
-        运动控制关键点（解决机器狗往前倾斜不走步的问题）：
-        1. 必须设置 min_linear_speed > 0.1 否则固件会认为是倾斜
-        2. 必须使用 ClassicWalk(True) + SpeedLevel(-1) 才能小碎步
-        3. 确保在运动模式 (mode 9) 下才能走步
-        4. 持续发送命令保持运动状态
+        使用 move_forward_distance 和 turn_angle 实现精确控制：
+        - 每次只移动一小步（20cm）
+        - 每次只转一小角度（5度）
+        - 执行完成后返回，不持续发送命令
         """
-        # ===== Step 1: 安全检查 - 确保机器狗已就绪 =====
+        # 确保机器人就绪
         if not self.ensure_robot_ready():
-            rospy.logwarn_throttle(
-                2.0,
-                "[Go2 SDK] 机器狗未就绪，停止运动指令"
-            )
-            if self.sport_client:
-                self.sport_client.StopMove()
-            self._reset_motion_state()
+            rospy.logwarn_throttle(2.0, "[精确控制] 机器狗未就绪")
             return None
         
         # 更新当前姿态
@@ -620,104 +613,44 @@ class MotionController:
         angle_ok = abs(angle_error) <= self.angle_tolerance
         center_ok = abs(offset_x) <= self.center_tolerance
         
-        self._check_positioned(distance_error, angle_error, offset_x)
-        
-        # ===== Step 2: 检查等待超时 - 持续发送命令避免狗停下来 =====
-        if self.motion_state == MotionState.WAITING:
-            if self._check_wait_timeout():
-                rospy.logwarn("[Go2 SDK] 等待超时，重置状态继续控制")
-            else:
-                # 持续发送命令 - Go2需要持续接收Move命令才会保持运动
-                if self.sport_client and (self._waiting_vx != 0 or self._waiting_vy != 0 or self._waiting_vyaw != 0):
-                    self.sport_client.Move(self._waiting_vx, self._waiting_vy, self._waiting_vyaw)
-                
-                elapsed = time.time() - self.motion_start_time
-                rospy.loginfo_throttle(
-                    0.5,
-                    f"[Go2 SDK] 持续发送命令... ({elapsed:.1f}/{self.estimated_duration:.1f}s)"
-                )
-                rospy.loginfo_throttle(
-                    2.0,
-                    "[Go2 SDK] [诊断] Move(vx=%.3f, vy=%.3f, vyaw=%.3f)",
-                    self._waiting_vx, self._waiting_vy, self._waiting_vyaw,
-                )
-                return None
-        
-        # 如果已到位，停止等待状态
+        # 如果已到位，停止运动
         if distance_ok and angle_ok and center_ok:
-            if self.motion_state != MotionState.IDLE:
-                rospy.loginfo("[Go2 SDK] 目标已到位，停止运动")
-                if self.sport_client:
-                    self.sport_client.StopMove()
-                self._reset_motion_state()
+            rospy.loginfo("[精确控制] 目标已到位，停止运动")
+            self.is_positioned = True
+            if self.sport_client:
+                self.sport_client.StopMove()
+            self._reset_motion_state()
             return None
         
-        if not self.sdk_initialized or not self.sport_client:
+        # 优先处理角度偏差
+        if not angle_ok:
+            # 需要旋转
+            turn_deg = 5 if angle_error > 0 else -5  # 每次转5度
+            # 限制最大角度
+            if abs(angle_error) < 5:
+                turn_deg = angle_error
+            
+            rospy.loginfo(f"[精确控制] 旋转 {turn_deg}度 (当前偏航{angle_error:.1f}度)")
+            self.turn_angle(turn_deg, timeout=3.0)
+            self.is_positioned = False
             return None
         
-        # 预估运动持续时间
-        self.estimated_duration = self._estimate_motion_duration(distance_error, angle_error)
+        # 处理距离偏差
+        if not distance_error > 0:
+            # 距离太远，需要前进
+            move_dist = min(0.2, distance_error)  # 每次最多前进20cm
+            rospy.loginfo(f"[精确控制] 前进 {move_dist*100:.1f}cm (当前距离{distance:.3f}m)")
+            self.move_forward_distance(move_dist, timeout=5.0)
+            self.is_positioned = False
+            return None
+        else:
+            # 距离太近，需要后退
+            move_dist = max(-0.2, distance_error)  # 每次最多后退20cm
+            rospy.loginfo(f"[精确控制] 后退 {abs(move_dist)*100:.1f}cm (当前距离{distance:.3f}m)")
+            self.move_forward_distance(move_dist, timeout=5.0)
+            self.is_positioned = False
+            return None
         
-        # ===== Step 3: 根据误差决定控制方式 =====
-        if not distance_ok:
-            # ===== 距离控制 - 关键：确保速度足够大 =====
-            # Go2机体坐标系：vx > 0 是前进，vx < 0 是后退
-            # 距离误差 = current - target
-            # error > 0: 太远 → 需要后退 (负速度)
-            # error < 0: 太近 → 需要前进 (正速度)
-            # 所以需要取反：-kp * error
-            raw_vel = self.kp_linear * distance_error
-            # 限幅到最大速度
-            linear_vel = np.clip(raw_vel, -self.max_linear_speed, self.max_linear_speed)
-            
-            # ===== 关键修复：确保速度不低于最小速度 =====
-            # 如果计算出的速度太小，固件会认为是倾斜而不是移动
-            if linear_vel != 0:
-                # 取绝对值的最小速度（排除死区）
-                min_speed = max(self.min_linear_speed, 0.1)  # 至少0.1否则不动
-                if abs(linear_vel) < min_speed:
-                    sign = 1 if linear_vel > 0 else -1
-                    linear_vel = sign * min_speed
-
-            rospy.loginfo(
-                f"[Go2 SDK] 距离控制: distance={distance:.3f}m, target={self.target_distance:.3f}m, "
-                f"error={distance_error:.3f}m, vx={linear_vel:.3f} m/s"
-            )
-            
-            # 记录运动类型与等待期间要持续发送的速度
-            self.motion_type = "move_forward" if linear_vel > 0 else "move_backward"
-            self._waiting_vx = float(linear_vel)
-            self._waiting_vy = 0.0
-            self._waiting_vyaw = 0.0
-            
-            # 下发命令
-            self.sport_client.Move(linear_vel, 0.0, 0.0)
-            self.motion_state = MotionState.WAITING
-            self.motion_start_time = time.time()
-            rospy.loginfo(f"[Go2 SDK] >>> 下发 Move(vx={linear_vel}, vy=0, vyaw=0), motion_state={self.motion_state}")
-            
-        elif not angle_ok:
-            # ===== 角度控制 =====
-            angular_vel = np.clip(-self.kp_angular * np.radians(angle_error),
-                                  -self.max_angular_speed, self.max_angular_speed)
-            
-            rospy.loginfo(
-                f"[Go2 SDK] 角度控制: yaw_err={angle_error:.2f}deg, wz={angular_vel:.3f} rad/s"
-            )
-            
-            # 记录运动类型与等待期间要持续发送的角速度
-            self.motion_type = "rotate_right" if angular_vel > 0 else "rotate_left"
-            self._waiting_vx = 0.0
-            self._waiting_vy = 0.0
-            self._waiting_vyaw = float(angular_vel)
-            
-            # 下发命令
-            self.sport_client.Move(0.0, 0.0, angular_vel)
-            self.motion_state = MotionState.WAITING
-            self.motion_start_time = time.time()
-            rospy.loginfo("[Go2 SDK] >>> 下发 Move(vx=0, vy=0, vyaw=%.3f)", angular_vel)
-        
-        # 返回 None 表示已通过 SDK 发送指令
         return None
 
     def _adjust_euler(self, offset_x, offset_y):
