@@ -662,11 +662,12 @@ class MotionController:
         # ===== Step 3: 根据误差决定控制方式 =====
         if not distance_ok:
             # ===== 距离控制 - 关键：确保速度足够大 =====
-            # 计算基础速度
-            # 注意：Go2机体坐标系中，vx > 0 是前进，vx < 0 是后退
-            # 当 distance > target_distance (太远) 时，应该前进 (正速度)
-            # 当 distance < target_distance (太近) 时，应该后退 (负速度)
-            raw_vel = self.kp_linear * distance_error
+            # Go2机体坐标系：vx > 0 是前进，vx < 0 是后退
+            # 距离误差 = current - target
+            # error > 0: 太远 → 需要后退 (负速度)
+            # error < 0: 太近 → 需要前进 (正速度)
+            # 所以需要取反：-kp * error
+            raw_vel = -self.kp_linear * distance_error
             # 限幅到最大速度
             linear_vel = np.clip(raw_vel, -self.max_linear_speed, self.max_linear_speed)
             
