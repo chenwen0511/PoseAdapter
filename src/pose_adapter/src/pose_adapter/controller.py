@@ -694,10 +694,7 @@ class MotionController:
             self.sport_client.Move(linear_vel, 0.0, 0.0)
             self.motion_state = MotionState.WAITING
             self.motion_start_time = time.time()
-            rospy.loginfo(
-                "[Go2 SDK] >>> 下发 Move(vx=%.3f, vy=0, vyaw=0)",
-                linear_vel,
-            )
+            rospy.loginfo(f"[Go2 SDK] >>> 下发 Move(vx={linear_vel}, vy=0, vyaw=0), motion_state={self.motion_state}")
             
         elif not angle_ok:
             # ===== 角度控制 =====
@@ -904,9 +901,10 @@ class MotionController:
 
         if self.motion_state != MotionState.WAITING:
             # 没有在等待运动，直接返回
+            rospy.logwarn(f"[Motion] motion_state={self.motion_state}, 不是WAITING, 直接返回")
             return True
 
-        rospy.loginfo(f"[Motion] 开始等待运动完成，超时: {timeout}s")
+        rospy.loginfo(f"[Motion] 开始等待运动完成，超时: {timeout}s, motion_state={self.motion_state}")
         start_time = time.time()
         last_diag_time = 0
 
