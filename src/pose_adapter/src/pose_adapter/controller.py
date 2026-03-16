@@ -42,8 +42,8 @@ class MotionController:
                  use_high_level_sdk=False,  # 是否使用 high_level SDK
                  interface_name="eth0",    # 网络接口名称
                  disable_obstacle_avoidance_on_start=True,  # 启动时是否尝试关闭避障
-                 use_classic_walk=True,    # 启用经典步态（稀碎步）
-                 speed_level=-1):           # SDK 速度档位：-1=慢 0=普通 1=快
+                 use_classic_walk=False,    # 默认步态便于走步
+                 speed_level=0):           # 普通速度
         """
         初始化控制器
 
