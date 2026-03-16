@@ -626,9 +626,7 @@ class MotionController:
             if self._check_wait_timeout():
                 rospy.logwarn("[Go2 SDK] 等待超时，重置状态继续控制")
             else:
-                # ===== 持续发送命令 - 关键！Go2需要持续接收Move命令才会保持运动 =====
-                self._set_gentle_gait(quiet=True, throttle_interval=2.0)
-                
+                # 持续发送命令 - Go2需要持续接收Move命令才会保持运动
                 if self.sport_client and (self._waiting_vx != 0 or self._waiting_vy != 0 or self._waiting_vyaw != 0):
                     self.sport_client.Move(self._waiting_vx, self._waiting_vy, self._waiting_vyaw)
                 
@@ -685,9 +683,6 @@ class MotionController:
                 f"error={distance_error:.3f}m, vx={linear_vel:.3f} m/s"
             )
             
-            # ===== 每次运动前重新设置步态 - 关键！=====
-            self._set_gentle_gait(quiet=True, throttle_interval=1.0)
-            
             # 记录运动类型与等待期间要持续发送的速度
             self.motion_type = "move_forward" if linear_vel > 0 else "move_backward"
             self._waiting_vx = float(linear_vel)
@@ -711,9 +706,6 @@ class MotionController:
             rospy.loginfo(
                 f"[Go2 SDK] 角度控制: yaw_err={angle_error:.2f}deg, wz={angular_vel:.3f} rad/s"
             )
-            
-            # 每次运动前重新设置步态
-            self._set_gentle_gait(quiet=True, throttle_interval=1.0)
             
             # 记录运动类型与等待期间要持续发送的角速度
             self.motion_type = "rotate_right" if angular_vel > 0 else "rotate_left"
