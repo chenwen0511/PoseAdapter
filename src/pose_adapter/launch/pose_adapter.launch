@@ -42,7 +42,7 @@
   <arg name="use_classic_walk" default="true"/>
   <arg name="speed_level" default="-1"/>
   <arg name="max_linear_speed" default="0.12"/>
-  <arg name="min_linear_speed" default="0"/>
+  <arg name="min_linear_speed" default="0.12"/>
   <arg name="max_angular_speed" default="0.25"/>
 
   <!-- Pose Adapter 主节点 -->
