@@ -53,7 +53,7 @@ def extract_contour_corners(cv_image, bbox):
     
     # 面积太小的不要
     roi_area = roi.shape[0] * roi.shape[1]
-    if area < roi_area * 0.1:
+    if area < roi_area * 0.03:  # 降低到 3%
         print(f"  [警告] 轮廓面积太小 ({area/roi_area*100:.1f}%)，回退到 bbox")
         return get_bbox_corners(bbox)
     
@@ -121,30 +121,53 @@ def sort_corners(corners):
 
 def simple_detection(cv_image):
     """
-    简单的电表检测（基于颜色/轮廓）
+    简单的电表检测（基于颜色：浅色区域）
     返回第一个检测到的 bbox
     """
     h, w = cv_image.shape[:2]
-    gray = cv2.cvtColor(cv_image, cv2.COLOR_BGR2GRAY)
+    total_area = h * w
     
-    # 自适应阈值
+    # 方法1: HSV 找浅色区域（电表白色/浅灰色）
+    hsv = cv2.cvtColor(cv_image, cv2.COLOR_BGR2HSV)
+    lower_white = np.array([0, 0, 150])
+    upper_white = np.array([180, 50, 255])
+    mask = cv2.inRange(hsv, lower_white, upper_white)
+    
+    contours, _ = cv2.findContours(mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+    
+    # 找大面积的浅色矩形区域
+    best_bbox = None
+    best_area = 0
+    
+    for cnt in contours:
+        area = cv2.contourArea(cnt)
+        if area < total_area * 0.02:  # 至少 2%
+            continue
+        
+        x, y, bw, bh = cv2.boundingRect(cnt)
+        aspect = bw / float(bh) if bh > 0 else 0
+        
+        # 电表宽高比通常 0.5-2.0
+        if 0.5 < aspect < 2.0:
+            if area > best_area:
+                best_area = area
+                best_bbox = (x, y, x+bw, y+bh)
+    
+    if best_bbox:
+        return best_bbox, best_area / total_area
+    
+    # 方法2: 自适应阈值（备用）
+    gray = cv2.cvtColor(cv_image, cv2.COLOR_BGR2GRAY)
     binary = cv2.adaptiveThreshold(gray, 255, cv2.ADAPTIVE_THRESH_GAUSSIAN_C, 
                                    cv2.THRESH_BINARY_INV, 11, 2)
     
-    # 形态学操作
     kernel = cv2.getStructuringElement(cv2.MORPH_RECT, (5, 5))
     binary = cv2.morphologyEx(binary, cv2.MORPH_CLOSE, kernel)
     
-    # 查找轮廓
     contours, _ = cv2.findContours(binary, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
     
-    total_area = w * h
-    min_area = total_area * 0.005  # 0.5%
-    max_area = total_area * 0.5    # 50%
-    
-    # 找最大的符合条件的轮廓
-    best_bbox = None
-    best_area = 0
+    min_area = total_area * 0.02
+    max_area = total_area * 0.5
     
     for cnt in contours:
         area = cv2.contourArea(cnt)
@@ -152,21 +175,10 @@ def simple_detection(cv_image):
             continue
         
         x, y, bw, bh = cv2.boundingRect(cnt)
+        aspect_ratio = bw / float(bh)
         
-        # 过滤掉靠近图像边缘的轮廓（可能是边框）
-        if x < 5 or y < 5 or x + bw > w - 5 or y + bh > h - 5:
-            continue
-        
-        aspect_ratio = bw / float(bh) if bh > 0 else 0
-        
-        # 电表通常是竖直矩形
-        if 0.3 < aspect_ratio < 3.0:
-            if area > best_area:
-                best_area = area
-                best_bbox = (x, y, x+bw, y+bh)
-    
-    if best_bbox:
-        return best_bbox, best_area / total_area
+        if 0.5 < aspect_ratio < 2.0:
+            return (x, y, x+bw, y+bh), area / total_area
     
     return None, 0
 
