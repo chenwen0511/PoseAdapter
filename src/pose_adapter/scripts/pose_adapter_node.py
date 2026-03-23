@@ -105,6 +105,8 @@ class PoseAdapterNode:
         self.use_paddle_ocr = rospy.get_param('~use_paddle_ocr', False)
         # 备用检测最小 bbox 面积占比（0-1），默认 0.05（5%）
         self.min_bbox_area_ratio = rospy.get_param('~min_bbox_area_ratio', 0.05)
+        # 关键点提取方式: bbox(默认) / contour / keypoint
+        self.keypoint_method = rospy.get_param('~keypoint_method', 'bbox')
         
         # GPU 加速（默认 True，使用 NVIDIA Jetson 的 GPU）
         self.use_gpu = rospy.get_param('~use_gpu', True)
@@ -233,9 +235,10 @@ class PoseAdapterNode:
             model_path=self.yolo_model_path,
             min_area_ratio=self.min_bbox_area_ratio,
             use_gpu=self.use_gpu,
+            keypoint_method=self.keypoint_method,
         )
         
-        rospy.loginfo(f"检测器 GPU 加速: {self.use_gpu}")
+        rospy.loginfo(f"检测器 GPU 加速: {self.use_gpu}, 关键点方式: {self.keypoint_method}")
         self.tracker = DeepSORTTracker()
         self.pose_solver = PoseSolver(
             self.camera_matrix,
@@ -407,7 +410,9 @@ class PoseAdapterNode:
                     return
         
         # 位姿解算
-        pose = self.pose_solver.solve(bbox, self.image_shape)
+        # 提取角点（根据配置使用 bbox 或 contour）
+        keypoints = self.detector.extract_corners(cv_image, bbox)
+        pose = self.pose_solver.solve(bbox, self.image_shape, keypoints=keypoints)
         
         # 计算画面占比和中心偏差
         ratio = self.pose_solver.get_target_bbox_ratio(bbox, self.image_shape)
@@ -611,7 +616,9 @@ class PoseAdapterNode:
                     return
             
             # PnP位姿解算
-            pose = self.pose_solver.solve(bbox, self.image_shape)
+            # 提取角点（根据配置使用 bbox 或 contour）
+            keypoints = self.detector.extract_corners(cv_image, bbox)
+            pose = self.pose_solver.solve(bbox, self.image_shape, keypoints=keypoints)
             rospy.loginfo("[Pipeline] === 步骤4: PnP位姿解算完成 ===")
             
             # 计算控制指令

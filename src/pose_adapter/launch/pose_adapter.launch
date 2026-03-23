@@ -29,6 +29,8 @@
   <arg name="use_paddle_ocr" default="false"/>
   <!-- 备用检测时，最小 bbox 面积占比（0-1），默认 0.05 即 5% -->
   <arg name="min_bbox_area_ratio" default="0.05"/>
+  <!-- 关键点提取方式: bbox(默认) / contour / keypoint -->
+  <arg name="keypoint_method" default="bbox"/>
 
   <!-- 图像来源：与 calibrate 一致，默认 /camera/image_raw（由其他节点发布相机 raw 图） -->
   <arg name="camera_image_topic" default="/camera/image_raw"/>
@@ -63,6 +65,7 @@
     <param name="yolo_model_path" value="$(arg yolo_model_path)"/>
     <param name="use_paddle_ocr" value="$(arg use_paddle_ocr)"/>
     <param name="min_bbox_area_ratio" value="$(arg min_bbox_area_ratio)"/>
+    <param name="keypoint_method" value="$(arg keypoint_method)"/>
     <param name="calib_file" value="$(arg calib_file)"/>
     <param name="use_go2_camera" value="$(arg use_go2_camera)"/>
     <param name="network_interface" value="$(arg network_interface)"/>

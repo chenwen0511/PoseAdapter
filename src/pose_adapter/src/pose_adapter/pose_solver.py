@@ -47,13 +47,14 @@ class PoseSolver:
         self._total_time = 0.0
         self._count = 0
     
-    def solve(self, bbox, image_shape):
+    def solve(self, bbox, image_shape, keypoints=None):
         """
         解算位姿
         
         Args:
             bbox: (x1, y1, x2, y2) 检测框
             image_shape: (h, w) 图像尺寸
+            keypoints: [[x,y], ...] 可选的4个角点，若提供则优先使用角点而非 bbox 角点
             
         Returns:
             dict: {
@@ -66,6 +67,11 @@ class PoseSolver:
                 'rvec': np.array    # 旋转向量
             }
         """
+        # 如果提供了关键点，使用关键点解算
+        if keypoints is not None and len(keypoints) == 4:
+            return self.solve_with_keypoints(keypoints, image_shape)
+        
+        # 否则使用 bbox 角点
         start_time = time.time()
         
         x1, y1, x2, y2 = bbox
@@ -136,6 +142,86 @@ class PoseSolver:
             
         except Exception as e:
             rospy.logerr(f"PnP 解算失败: {e}")
+            return {'success': False}
+    
+    def solve_with_keypoints(self, keypoints, image_shape):
+        """
+        使用关键点解算位姿
+        
+        Args:
+            keypoints: [[x,y], [x,y], [x,y], [x,y]] 四个角点（顺时针）
+            image_shape: (h, w) 图像尺寸
+            
+        Returns:
+            dict: 同 solve() 返回值
+        """
+        start_time = time.time()
+        
+        # 关键点顺序需与 object_points 对应：
+        # object_points: 左下 -> 右下 -> 右上 -> 左上
+        # keypoints 期望: 左上 -> 右上 -> 右下 -> 左下（顺时针）
+        # 所以需要转换顺序
+        image_points = np.array([
+            [keypoints[3][0], keypoints[3][1]],  # 左下
+            [keypoints[2][0], keypoints[2][1]],  # 右下
+            [keypoints[1][0], keypoints[1][1]],  # 右上
+            [keypoints[0][0], keypoints[0][1]]   # 左上
+        ], dtype=np.float64)
+        
+        try:
+            # PnP 解算
+            success, rvec, tvec = cv2.solvePnP(
+                self.object_points,
+                image_points,
+                self.K,
+                self.dist_coeffs,
+                flags=cv2.SOLVEPNP_ITERATIVE
+            )
+            
+            if not success:
+                return {'success': False}
+            
+            # 计算距离
+            distance = np.linalg.norm(tvec)
+            
+            # 转换为欧拉角
+            R, _ = cv2.Rodrigues(rvec)
+            yaw, pitch, roll = self._rotation_matrix_to_euler(R)
+            
+            pose = {
+                'success': True,
+                'distance': float(distance),
+                'yaw': float(np.degrees(yaw)),
+                'pitch': float(np.degrees(pitch)),
+                'roll': float(np.degrees(roll)),
+                'tvec': tvec.flatten(),
+                'rvec': rvec.flatten()
+            }
+            
+            # 耗时统计
+            elapsed = (time.time() - start_time) * 1000
+            self._total_time += elapsed
+            self._count += 1
+            avg_time = self._total_time / self._count if self._count > 0 else 0
+            
+            # 调试日志
+            rospy.loginfo_throttle(
+                1.0,
+                "[PnP] keypoints=%s, "
+                "distance=%.3f m, yaw=%.2f deg, 耗时=%.1fms" % (
+                    keypoints,
+                    distance,
+                    np.degrees(yaw),
+                    elapsed
+                )
+            )
+            
+            # 平滑滤波
+            smoothed_pose = self._smooth_pose(pose)
+            return smoothed_pose
+            
+        except Exception as e:
+            rospy.logerr(f"PnP 关键点解算失败: {e}")
             return {'success': False}
     
     def _rotation_matrix_to_euler(self, R):

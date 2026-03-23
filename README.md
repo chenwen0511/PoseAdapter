@@ -160,4 +160,26 @@ BODY=GO2 roslaunch pose_adapter pose_adapter.launch
 
 - `standUp()`: 站立
 - `lieDown()`: 趴下
+
+---
+
+## 关键点提取方式
+
+用于提升斜视角电表的位姿解算精度：
+
+| 方式 | 说明 |
+|------|------|
+| `bbox` | 使用检测框的四个角点（默认，现有方式） |
+| `contour` | 使用轮廓检测 + 角点提取（新增，推荐测试） |
+| `keypoint` | 预留接口，需训练关键点检测模型 |
+
+### 启动方式
+
+```bash
+# 使用 contour 方式
+keypoint_method:=contour roslaunch pose_adapter pose_adapter.launch
+
+# 或在 launch 中修改默认值
+<arg name="keypoint_method" default="contour"/>
+```
 ```
