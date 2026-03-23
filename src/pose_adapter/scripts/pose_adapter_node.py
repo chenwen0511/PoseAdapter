@@ -118,6 +118,9 @@ class PoseAdapterNode:
         # 是否使用 Go2 相机 SDK 取流（默认 False，从 camera_image_topic 取图）
         self.use_go2_camera = rospy.get_param('~use_go2_camera', False)
 
+        # 机器狗类型: "GO2" (Unitree), "ZSI-1" (zsibot_sdk)，默认从环境变量 BODY 读取
+        self.body_type = rospy.get_param('~body_type', None)
+
         # 是否使用 Unitree SDK high_level 接口控制（默认 True，优先使用 SDK）
         self.use_high_level_sdk = rospy.get_param('~use_high_level_sdk', True)
         # 运动前提：关闭避障。SDK 支持时是否在启动时尝试关闭避障
@@ -252,6 +255,7 @@ class PoseAdapterNode:
             disable_obstacle_avoidance_on_start=self.disable_obstacle_avoidance_on_start,
             use_classic_walk=self.use_classic_walk,
             speed_level=self.speed_level,
+            body_type=self.body_type,
         )
         self.ocr = None  # 延迟初始化
         

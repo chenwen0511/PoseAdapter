@@ -3,11 +3,13 @@
 """
 运动控制器 - 生成控制指令实现机器狗位姿调整
 
-支持两种模式：
+支持三种模式：
 1. cmd_vel 模式：通过 ROS cmd_vel 控制（原有方式）
-2. high_level 模式：通过 Unitree SDK high_level 接口控制
+2. high_level 模式：通过 Unitree SDK high_level 接口控制（Go2）
+3. ZSI-1 模式：通过 zsibot_sdk 控制（zsl-1 机器狗）
 """
 
+import os
 import rospy
 from geometry_msgs.msg import Twist
 import numpy as np
@@ -45,7 +47,8 @@ class MotionController:
                  interface_name="eth0",    # 网络接口名称
                  disable_obstacle_avoidance_on_start=True,  # 启动时是否尝试关闭避障
                  use_classic_walk=False,    # 默认步态便于走步
-                 speed_level=0):           # 普通速度
+                 speed_level=0,            # 普通速度
+                 body_type=None):          # 机器狗类型: None (自动检测), "GO2", "ZSI-1"
         """
         初始化控制器
 
@@ -61,7 +64,18 @@ class MotionController:
             use_high_level_sdk: 是否使用 Unitree SDK high_level 接口
             interface_name: 网络接口名称（如 eth0, enp2s0 等）
             disable_obstacle_avoidance_on_start: 启动时是否尝试关闭避障（整个 adapter 运动控制需在关闭避障+经典步态下运行）
+            body_type: 机器狗类型 ("GO2", "ZSI-1")，默认从环境变量 BODY 读取
         """
+        # 自动检测 body_type
+        if body_type is None:
+            body_type = os.environ.get('BODY', '').strip()
+        
+        self.body_type = body_type.upper() if body_type else None
+        rospy.loginfo(f"[运动控制器] body_type: {self.body_type}")
+        
+        # ZSI-1 模式优先级高于 use_high_level_sdk
+        self.use_zsi1_sdk = self.body_type == 'ZSI-1'
+        
         self.target_distance = target_distance
         self.target_ratio = target_ratio
         self.distance_tolerance = distance_tolerance
@@ -133,7 +147,9 @@ class MotionController:
         self._last_gentle_gait_time = 0.0  # 上次施加柔和步态的时间（用于节流）
 
         # 初始化
-        if self.use_high_level_sdk:
+        if self.use_zsi1_sdk:
+            self._init_zsi1_sdk()
+        elif self.use_high_level_sdk:
             self._init_high_level_sdk()
         else:
             self._init_ros()
@@ -145,6 +161,59 @@ class MotionController:
             rospy.loginfo("运动控制器已初始化（cmd_vel 模式），发布到 /cmd_vel")
         except Exception as e:
             rospy.logerr(f"ROS 初始化失败: {e}")
+
+    def _init_zsi1_sdk(self):
+        """
+        初始化 zsibot_sdk (ZSI-1) 接口
+        
+        ZSI-1 机器狗控制接口:
+        - move(vx, vy, yaw_rate): 速度控制
+        - attitudeControl(roll_vel, pitch_vel, yaw_vel, height_vel): 姿态控制
+        """
+        try:
+            import sys
+            import platform
+            
+            # 设置库路径
+            arch = platform.machine().replace('amd64', 'x86_64').replace('arm64', 'aarch64')
+            sdk_path = os.path.join(os.environ.get('ZSI_SDK_ROOT', '/home/stephen/.openclaw/workspace/zsibot_sdk'), 
+                                    f'lib/zsl-1/{arch}')
+            
+            if sdk_path not in sys.path:
+                sys.path.insert(0, sdk_path)
+            
+            import mc_sdk_zsl_1_py
+            
+            # 创建 HighLevel 客户端
+            self.zsi_client = mc_sdk_zsl_1_py.HighLevel()
+            
+            # 初始化连接
+            local_ip = os.environ.get('ZSI_LOCAL_IP', '192.168.1.100')
+            local_port = int(os.environ.get('ZSI_LOCAL_PORT', 43988))
+            dog_ip = os.environ.get('ZSI_DOG_IP', '192.168.234.1')
+            
+            self.zsi_client.initRobot(local_ip, local_port, dog_ip)
+            
+            self.sdk_initialized = True
+            rospy.loginfo(f"[ZSI-1 SDK] ✓ 已初始化，连接 {local_ip}:{local_port} -> {dog_ip}")
+            
+            # 站立
+            rospy.loginfo("[ZSI-1 SDK] 站立...")
+            self.zsi_client.standUp()
+            rospy.sleep(2)
+            
+            rospy.loginfo("[ZSI-1 SDK] ===== SDK 初始化完成 =====")
+            
+        except ImportError as e:
+            rospy.logerr(f"[ZSI-1 SDK] ✗ 导入失败: {e}")
+            rospy.logwarn("回退到 cmd_vel 模式")
+            self.use_zsi1_sdk = False
+            self._init_ros()
+        except Exception as e:
+            rospy.logerr(f"[ZSI-1 SDK] ✗ 初始化失败: {e}")
+            rospy.logwarn("回退到 cmd_vel 模式")
+            self.use_zsi1_sdk = False
+            self._init_ros()
 
     def _init_high_level_sdk(self):
         """
@@ -796,7 +865,10 @@ class MotionController:
     def stop(self):
         """停止运动"""
         self.is_running = False
-        if self.use_high_level_sdk and self.sport_client:
+        if self.use_zsi1_sdk and hasattr(self, 'zsi_client') and self.zsi_client:
+            self.zsi_client.move(0, 0, 0)
+            rospy.loginfo("停止运动 (ZSI-1)")
+        elif self.use_high_level_sdk and self.sport_client:
             self.sport_client.StopMove()
             rospy.loginfo("停止运动 (SDK)")
         else:
@@ -806,7 +878,12 @@ class MotionController:
 
     def stand_up(self):
         """站立"""
-        if self.use_high_level_sdk and self.sport_client:
+        if self.use_zsi1_sdk and hasattr(self, 'zsi_client') and self.zsi_client:
+            self.zsi_client.standUp()
+            rospy.loginfo("站立 (ZSI-1)")
+            self.is_robot_standing = True
+            self.is_robot_unlocked = True
+        elif self.use_high_level_sdk and self.sport_client:
             self.sport_client.StandUp()
             rospy.loginfo("站立 (SDK)")
             # 更新状态标志
@@ -815,7 +892,11 @@ class MotionController:
 
     def stand_down(self):
         """趴下"""
-        if self.use_high_level_sdk and self.sport_client:
+        if self.use_zsi1_sdk and hasattr(self, 'zsi_client') and self.zsi_client:
+            self.zsi_client.lieDown()
+            rospy.loginfo("趴下 (ZSI-1)")
+            self.is_robot_standing = False
+        elif self.use_high_level_sdk and self.sport_client:
             self.sport_client.StandDown()
             rospy.loginfo("趴下 (SDK)")
             # 更新状态标志
@@ -823,9 +904,29 @@ class MotionController:
 
     def balance_stand(self):
         """平衡站立"""
-        if self.use_high_level_sdk and self.sport_client:
+        if self.use_zsi1_sdk and hasattr(self, 'zsi_client') and self.zsi_client:
+            self.zsi_client.standUp()
+            rospy.loginfo("平衡站立 (ZSI-1)")
+        elif self.use_high_level_sdk and self.sport_client:
             self.sport_client.BalanceStand()
             rospy.loginfo("平衡站立 (SDK)")
+
+    def attitude_control(self, roll_vel=0.0, pitch_vel=0.0, yaw_vel=0.0, height_vel=0.0):
+        """
+        姿态控制
+        
+        Args:
+            roll_vel: 翻滚角速度 (rad/s)
+            pitch_vel: 俯仰角速度 (rad/s)
+            yaw_vel: 偏航角速度 (rad/s)
+            height_vel: 高度变化速度 (m/s)
+        """
+        if self.use_zsi1_sdk and hasattr(self, 'zsi_client') and self.zsi_client:
+            self.zsi_client.attitudeControl(roll_vel, pitch_vel, yaw_vel, height_vel)
+            rospy.loginfo(f"[ZSI-1] 姿态控制: roll={roll_vel}, pitch={pitch_vel}, yaw={yaw_vel}, height={height_vel}")
+        elif self.use_high_level_sdk and self.sport_client:
+            # Unitree SDK 可能没有直接的 attitudeControl 接口
+            rospy.logwarn("[SDK] attitudeControl 暂不支持")
 
     def move_forward_distance(self, distance_m, timeout=10.0):
         """
@@ -844,6 +945,10 @@ class MotionController:
         Returns:
             bool: True 表示运动完成
         """
+        # ZSI-1 模式
+        if self.use_zsi1_sdk and hasattr(self, 'zsi_client') and self.zsi_client:
+            return self._zsi1_move_forward(distance_m, timeout)
+        
         if not self.use_high_level_sdk or not self.sport_client:
             return True
         
@@ -880,6 +985,45 @@ class MotionController:
         
         return True
 
+    def _zsi1_move_forward(self, distance_m, timeout=10.0):
+        """
+        ZSI-1 前进指定距离（米）
+        
+        使用 zsibot_sdk 的 move(vx, vy, yaw_rate) 接口
+        """
+        direction = "前进" if distance_m > 0 else "后退"
+        rospy.loginfo(f"[ZSI-1] {direction} {abs(distance_m)*100:.1f}cm")
+        
+        # 确保机器人已站立
+        if not self.is_robot_standing:
+            rospy.loginfo("[ZSI-1] 站立...")
+            self.zsi_client.standUp()
+            rospy.sleep(2)
+            self.is_robot_standing = True
+        
+        # 使用保守的固定速度
+        speed = max(0.1, min(self.max_linear_speed, 0.15))
+        duration = abs(distance_m) / speed
+        duration = min(duration, timeout)
+        
+        # 确定方向
+        vx = speed if distance_m > 0 else -speed
+        
+        rospy.loginfo(f"[ZSI-1] 速度 {vx:.3f}m/s, 预计时间 {duration:.2f}s")
+        
+        # 发送运动命令
+        self.zsi_client.move(vx, 0.0, 0.0)
+        
+        # 等待指定时间
+        rospy.sleep(duration)
+        
+        # 停止
+        self.zsi_client.move(0, 0, 0)
+        actual_distance = speed * duration
+        rospy.loginfo(f"[ZSI-1] {direction}完成，实际移动约 {actual_distance*100:.1f}cm")
+        
+        return True
+
     def turn_angle(self, angle_deg, timeout=10.0):
         """
         旋转指定角度（度）- 基于角速度+时间控制
@@ -896,6 +1040,10 @@ class MotionController:
         Returns:
             bool: True 表示旋转完成
         """
+        # ZSI-1 模式
+        if self.use_zsi1_sdk and hasattr(self, 'zsi_client') and self.zsi_client:
+            return self._zsi1_turn_angle(angle_deg, timeout)
+        
         if not self.use_high_level_sdk or not self.sport_client:
             return True
         
@@ -929,6 +1077,45 @@ class MotionController:
         self.sport_client.StopMove()
         actual_angle = np.degrees(angular_speed * duration)
         rospy.loginfo(f"[精确控制] {direction}完成，实际旋转约 {actual_angle:.1f}度")
+        
+        return True
+
+    def _zsi1_turn_angle(self, angle_deg, timeout=10.0):
+        """
+        ZSI-1 旋转指定角度（度）
+        
+        使用 zsibot_sdk 的 move(vx, vy, yaw_rate) 接口
+        """
+        direction = "左转" if angle_deg > 0 else "右转"
+        rospy.loginfo(f"[ZSI-1] {direction} {abs(angle_deg):.1f}度")
+        
+        # 确保机器人已站立
+        if not self.is_robot_standing:
+            rospy.loginfo("[ZSI-1] 站立...")
+            self.zsi_client.standUp()
+            rospy.sleep(2)
+            self.is_robot_standing = True
+        
+        # 使用固定的角速度
+        angular_speed = min(self.max_angular_speed, 0.2)  # 0.2 rad/s
+        duration = abs(np.radians(angle_deg)) / angular_speed
+        duration = min(duration, timeout)
+        
+        # 确定方向
+        vyaw = angular_speed if angle_deg > 0 else -angular_speed
+        
+        rospy.loginfo(f"[ZSI-1] 角速度 {vyaw:.3f}rad/s, 预计时间 {duration:.2f}s")
+        
+        # 发送旋转命令
+        self.zsi_client.move(0.0, 0.0, vyaw)
+        
+        # 等待指定时间
+        rospy.sleep(duration)
+        
+        # 停止
+        self.zsi_client.move(0, 0, 0)
+        actual_angle = np.degrees(angular_speed * duration)
+        rospy.loginfo(f"[ZSI-1] {direction}完成，实际旋转约 {actual_angle:.1f}度")
         
         return True
 

@@ -48,6 +48,9 @@
   <arg name="step_distance" default="0.2"/>  <!-- 每次移动步长（米），默认20cm -->
   <arg name="step_angle" default="5.0"/>     <!-- 每次旋转步长（度），默认5度 -->
 
+  <!-- 机器狗类型: GO2 (Unitree), ZSI-1 (zsibot_sdk)，默认从环境变量 BODY 读取 -->
+  <arg name="body_type" default=""/>
+
   <!-- Pose Adapter 主节点 -->
   <node name="pose_adapter" pkg="pose_adapter" type="pose_adapter_node.py" output="screen">
     <param name="camera_width" value="$(arg camera_width)"/>
@@ -73,6 +76,7 @@
     <param name="max_angular_speed" value="$(arg max_angular_speed)"/>
     <param name="step_distance" value="$(arg step_distance)"/>
     <param name="step_angle" value="$(arg step_angle)"/>
+    <param name="body_type" value="$(arg body_type)"/>
   </node>
 
   <!-- 图像查看（可选，无显示器时需设为 false） -->

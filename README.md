@@ -113,4 +113,51 @@ catkin_make
 ```bash
 source devel/setup.bash
 ./start.sh restart     # 或 ./start.sh start
+
+---
+
+## 机器狗类型
+
+本工程支持两种机器狗类型：
+- **GO2**: 使用 Unitree SDK (high_level)
+- **ZSI-1**: 使用 zsibot_sdk (zsl-1)
+
+### 启动方式
+
+```bash
+# ZSI-1 模式 (默认)
+./start.sh
+
+# 或
+BODY=ZSI-1 roslaunch pose_adapter pose_adapter.launch
+
+# GO2 模式
+BODY=GO2 roslaunch pose_adapter pose_adapter.launch
+```
+
+### 环境变量
+
+| 变量 | 默认值 | 说明 |
+|------|--------|------|
+| `BODY` | `ZSI-1` | 机器狗类型 |
+| `ZSI_SDK_ROOT` | `/home/stephen/.openclaw/workspace/zsibot_sdk` | SDK 路径 |
+| `ZSI_LOCAL_IP` | `192.168.1.100` | 本地 IP |
+| `ZSI_LOCAL_PORT` | `43988` | 本地端口 |
+| `ZSI_DOG_IP` | `192.168.234.1` | 机器狗 IP |
+
+### ZSI-1 控制接口
+
+- `move(vx, vy, yaw_rate)`: 速度控制
+  - vx: 前进/后退速度 (m/s)
+  - vy: 左右平移速度 (m/s)
+  - yaw_rate: 偏航角速度 (rad/s)
+
+- `attitudeControl(roll_vel, pitch_vel, yaw_vel, height_vel)`: 姿态控制
+  - roll_vel: 翻滚角速度 (rad/s)
+  - pitch_vel: 俯仰角速度 (rad/s)
+  - yaw_vel: 偏航角速度 (rad/s)
+  - height_vel: 高度变化速度 (m/s)
+
+- `standUp()`: 站立
+- `lieDown()`: 趴下
 ```
