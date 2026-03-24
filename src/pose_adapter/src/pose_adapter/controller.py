@@ -16,6 +16,7 @@ from geometry_msgs.msg import Twist
 import numpy as np
 import time
 import threading
+import threading
 
 
 # SDK 单例（与 dog_device 一致）
@@ -208,6 +209,7 @@ class MotionController(Node):
             self._zsi_max_vx = 2.0
             self._zsi_max_vy = 2.0
             self._zsi_max_wz = 3.0
+            self._zsi_move_lock = threading.Lock()
             
             self.get_logger().info("[ZSI-1 SDK] SDK 初始化完成")
             
@@ -621,7 +623,8 @@ class MotionController(Node):
         """停止运动"""
         self.is_running = False
         if self.use_zsi1_sdk and hasattr(self, 'zsi_client') and self.zsi_client:
-            self.zsi_client.move(0, 0, 0)
+            with self._zsi_move_lock:
+                self.zsi_client.move(0, 0, 0)
             self.get_logger().info("停止运动 (ZSI-1)")
         elif self.use_high_level_sdk and self.sport_client:
             self.sport_client.StopMove()
@@ -722,9 +725,10 @@ class MotionController(Node):
         vx = speed if distance_m > 0 else -speed
         vx, vy, wz = self._zsi_clamp_speed(vx, 0.0, 0.0)
         
-        self.zsi_client.move(vx, vy, wz)
-        self._sleep(duration)
-        self.zsi_client.move(0, 0, 0)
+        with self._zsi_move_lock:
+            self.zsi_client.move(vx, vy, wz)
+            self._sleep(duration)
+            self.zsi_client.move(0, 0, 0)
         
         return True
 
@@ -771,9 +775,10 @@ class MotionController(Node):
         wz = angular_speed if angle_deg > 0 else -angular_speed
         vx, vy, wz = self._zsi_clamp_speed(0.0, 0.0, wz)
         
-        self.zsi_client.move(vx, vy, wz)
-        self._sleep(duration)
-        self.zsi_client.move(0, 0, 0)
+        with self._zsi_move_lock:
+            self.zsi_client.move(vx, vy, wz)
+            self._sleep(duration)
+            self.zsi_client.move(0, 0, 0)
         
         return True
 
