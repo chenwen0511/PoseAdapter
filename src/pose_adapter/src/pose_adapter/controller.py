@@ -15,7 +15,12 @@ from rclpy.node import Node
 from geometry_msgs.msg import Twist
 import numpy as np
 import time
+import threading
 
+
+# SDK 单例（与 dog_device 一致）
+_zsi_app_instance = None
+_zsi_app_lock = threading.Lock()
 
 class MotionState:
     """运动状态机"""
@@ -180,22 +185,29 @@ class MotionController(Node):
             
             import mc_sdk_zsl_1_py
             
-            self.zsi_client = mc_sdk_zsl_1_py.HighLevel()
-            
             local_ip = os.environ.get('ZSI_LOCAL_IP', '192.168.234.15')
             local_port = int(os.environ.get('ZSI_LOCAL_PORT', 43988))
             dog_ip = os.environ.get('ZSI_DOG_IP', '192.168.234.1')
             
-            self.zsi_client.initRobot(local_ip, local_port, dog_ip)
+            # 使用单例模式（与 dog_device 一致）
+            global _zsi_app_instance
+            if _zsi_app_instance is None:
+                with _zsi_app_lock:
+                    if _zsi_app_instance is None:
+                        _zsi_app_instance = mc_sdk_zsl_1_py.HighLevel()
+                        _zsi_app_instance.initRobot(local_ip, local_port, dog_ip)
+            self.zsi_client = _zsi_app_instance
             
             self.sdk_initialized = True
             self.get_logger().info(f"[ZSI-1 SDK] 已初始化，连接 {local_ip}:{local_port} -> {dog_ip}")
             
-            self.get_logger().info("[ZSI-1 SDK] 站立...")
-            self.zsi_client.standUp()
-            self._sleep(2)
-
-            self._zsi1_preflight_check()
+            # 速度限制参数（与 dog_device 一致）
+            self._zsi_deadzone_vx = 0.05
+            self._zsi_deadzone_vy = 0.05
+            self._zsi_deadzone_wz = 0.02
+            self._zsi_max_vx = 2.0
+            self._zsi_max_vy = 2.0
+            self._zsi_max_wz = 3.0
             
             self.get_logger().info("[ZSI-1 SDK] SDK 初始化完成")
             
@@ -678,6 +690,21 @@ class MotionController(Node):
         
         return True
 
+    def _zsi_clamp_speed(self, vx, vy, wz):
+        """速度限制（与 dog_device 一致）"""
+        # 死区
+        if -self._zsi_deadzone_wz < wz < self._zsi_deadzone_wz:
+            wz = 0.0
+        if -self._zsi_deadzone_vx < vx < self._zsi_deadzone_vx:
+            vx = 0.0
+        if -self._zsi_deadzone_vy < vy < self._zsi_deadzone_vy:
+            vy = 0.0
+        # 饱和
+        wz = max(-self._zsi_max_wz, min(self._zsi_max_wz, wz))
+        vx = max(-self._zsi_max_vx, min(self._zsi_max_vx, vx))
+        vy = max(-self._zsi_max_vy, min(self._zsi_max_vy, vy))
+        return vx, vy, wz
+    
     def _zsi1_move_forward(self, distance_m, timeout=10.0):
         """ZSI-1 前进指定距离"""
         direction = "前进" if distance_m > 0 else "后退"
@@ -693,8 +720,9 @@ class MotionController(Node):
         duration = min(duration, timeout)
         
         vx = speed if distance_m > 0 else -speed
+        vx, vy, wz = self._zsi_clamp_speed(vx, 0.0, 0.0)
         
-        self.zsi_client.move(vx, 0.0, 0.0)
+        self.zsi_client.move(vx, vy, wz)
         self._sleep(duration)
         self.zsi_client.move(0, 0, 0)
         
@@ -740,9 +768,10 @@ class MotionController(Node):
         duration = abs(np.radians(angle_deg)) / angular_speed
         duration = min(duration, timeout)
         
-        vyaw = angular_speed if angle_deg > 0 else -angular_speed
+        wz = angular_speed if angle_deg > 0 else -angular_speed
+        vx, vy, wz = self._zsi_clamp_speed(0.0, 0.0, wz)
         
-        self.zsi_client.move(0.0, 0.0, vyaw)
+        self.zsi_client.move(vx, vy, wz)
         self._sleep(duration)
         self.zsi_client.move(0, 0, 0)
         
