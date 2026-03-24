@@ -17,7 +17,7 @@ FPS="${FPS:-15}"
 
 mkdir -p "$SAVE_PATH"
 
-PYTHON_CMD="${PYTHON_CMD:-python3}"
+PYTHON_CMD="${PYTHON_CMD:-python3.10}"
 
 echo "[1/3] 启动 RTSP 拉流发布节点..."
 "$PYTHON_CMD" publish_go2_camera.py \

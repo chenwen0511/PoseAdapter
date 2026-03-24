@@ -150,10 +150,30 @@ class MotionController(Node):
             import platform
             
             arch = platform.machine().replace('amd64', 'x86_64').replace('arm64', 'aarch64')
-            sdk_path = os.path.join(
-                os.environ.get('ZSI_SDK_ROOT', '/home/stephen/.openclaw/workspace/zsibot_sdk'), 
-                f'lib/zsl-1/{arch}'
-            )
+            env_zsi_root = os.environ.get('ZSI_SDK_ROOT')
+            if env_zsi_root:
+                sdk_root = os.path.abspath(os.path.expanduser(env_zsi_root))
+            else:
+                candidates = [
+                    # 常见用法：在 PoseAdapter 目录执行 ros2 launch
+                    os.path.abspath(os.path.join(os.getcwd(), '..', 'zsibot_sdk')),
+                    # 从源码目录运行时的相对推导
+                    os.path.abspath(os.path.join(os.path.dirname(__file__), '..', '..', '..', '..', '..', 'zsibot_sdk')),
+                    # 从 install 目录运行时的相对推导
+                    os.path.abspath(os.path.join(os.path.dirname(__file__), '..', '..', '..', '..', '..', '..', '..', '..', 'zsibot_sdk')),
+                ]
+                sdk_root = next((p for p in candidates if os.path.isdir(p)), candidates[0])
+
+            sdk_path = os.path.join(sdk_root, f'lib/zsl-1/{arch}')
+            self.get_logger().info(f"[ZSI-1 SDK] ZSI_SDK_ROOT={sdk_root}")
+            self.get_logger().info(f"[ZSI-1 SDK] Python 模块目录={sdk_path}")
+
+            if not os.path.isdir(sdk_path):
+                raise RuntimeError(
+                    f"[ZSI-1 SDK] 未找到目录: {sdk_path}。"
+                    "请确认 ZSI_SDK_ROOT=../zsibot_sdk，且已按官方文档编译生成 lib/zsl-1/<arch>。"
+                    "参考: https://zsibot.github.io/zsibot_sdk"
+                )
             
             if sdk_path not in sys.path:
                 sys.path.insert(0, sdk_path)
@@ -162,7 +182,7 @@ class MotionController(Node):
             
             self.zsi_client = mc_sdk_zsl_1_py.HighLevel()
             
-            local_ip = os.environ.get('ZSI_LOCAL_IP', '192.168.1.100')
+            local_ip = os.environ.get('ZSI_LOCAL_IP', '192.168.234.15')
             local_port = int(os.environ.get('ZSI_LOCAL_PORT', 43988))
             dog_ip = os.environ.get('ZSI_DOG_IP', '192.168.234.1')
             
@@ -174,19 +194,43 @@ class MotionController(Node):
             self.get_logger().info("[ZSI-1 SDK] 站立...")
             self.zsi_client.standUp()
             self._sleep(2)
+
+            self._zsi1_preflight_check()
             
             self.get_logger().info("[ZSI-1 SDK] SDK 初始化完成")
             
         except ImportError as e:
             self.get_logger().error(f"[ZSI-1 SDK] 导入失败: {e}")
-            self.get_logger().warn("回退到 cmd_vel 模式")
-            self.use_zsi1_sdk = False
-            self._init_ros()
+            raise RuntimeError(
+                "[ZSI-1 SDK] 必须安装并可导入 mc_sdk_zsl_1_py；当前已按要求禁止回退到 cmd_vel。"
+                "请确认 ZSI_SDK_ROOT=../zsibot_sdk，且该目录下存在 lib/zsl-1/<arch>/mc_sdk_zsl_1_py*。"
+                "参考: https://zsibot.github.io/zsibot_sdk"
+            ) from e
         except Exception as e:
             self.get_logger().error(f"[ZSI-1 SDK] 初始化失败: {e}")
-            self.get_logger().warn("回退到 cmd_vel 模式")
-            self.use_zsi1_sdk = False
-            self._init_ros()
+            raise RuntimeError("[ZSI-1 SDK] 初始化失败；当前已按要求禁止回退到 cmd_vel。") from e
+
+    def _zsi1_preflight_check(self):
+        """ZSI-1 启动预检：最小动作探测，提前暴露控制权/自检异常。"""
+        self.get_logger().info("[ZSI-1 SDK] 预检开始：standUp + move(0,0,0) 探测")
+        last_err = None
+        for i in range(3):
+            try:
+                self.zsi_client.standUp()
+                self._sleep(0.5)
+                self.zsi_client.move(0.0, 0.0, 0.0)
+                self._sleep(0.2)
+                self.get_logger().info(f"[ZSI-1 SDK] 预检通过 (attempt={i + 1})")
+                return
+            except Exception as e:
+                last_err = e
+                self.get_logger().warn(f"[ZSI-1 SDK] 预检失败 (attempt={i + 1}): {e}")
+                self._sleep(0.5)
+
+        raise RuntimeError(
+            "[ZSI-1 SDK] 预检失败：机器人可能处于 passive/自检失败/控制权冲突状态。"
+            "请检查遥控器与APP是否占用控制权、机器人是否已完成自检并处于可运动状态。"
+        ) from last_err
 
     def _init_high_level_sdk(self):
         """初始化 Unitree SDK high_level 接口"""

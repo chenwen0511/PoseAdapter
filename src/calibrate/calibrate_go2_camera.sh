@@ -16,7 +16,7 @@ OUTPUT_YAML="${OUTPUT_YAML:-$SAVE_PATH/rtsp_camera_calib.yaml}"
 FPS="${FPS:-15}"
 
 mkdir -p "$SAVE_PATH"
-PYTHON_CMD="${PYTHON_CMD:-python3}"
+PYTHON_CMD="${PYTHON_CMD:-python3.10}"
 
 echo "启动 RTSP 相机发布节点..."
 "$PYTHON_CMD" publish_go2_camera.py \

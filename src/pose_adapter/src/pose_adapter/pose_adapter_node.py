@@ -10,9 +10,8 @@ import os
 import rclpy
 from rclpy.node import Node
 from rclpy.qos import QoSProfile, ReliabilityPolicy, HistoryPolicy
-# from sensor_msgs.msg import Image  # RTSP 模式不需要
+from sensor_msgs.msg import Image
 from geometry_msgs.msg import Twist
-from cv_bridge import CvBridge
 import cv2
 import queue
 import threading
@@ -60,9 +59,6 @@ class PoseAdapterNode(Node):
         self.image_shape = None
         self._load_calib_from_file()
         
-        # CV 桥接
-        self.bridge = CvBridge()
-        
         # 模块
         self.detector = None
         self.tracker = None
@@ -81,6 +77,7 @@ class PoseAdapterNode(Node):
         self.is_running = True
         self.ocr_result = None
         self._frame_count = 0
+        self._throttle_ts = {}
         
         # 防死循环
         self._consecutive_timeouts = 0
@@ -165,6 +162,16 @@ class PoseAdapterNode(Node):
         self.target_ratio = self.get_parameter('target_ratio').value
         self.loop_hz = self.get_parameter('loop_hz').value
         self.yolo_model_path = self.get_parameter('yolo_model_path').value
+        if not self.yolo_model_path:
+            raise RuntimeError("未设置 yolo_model_path，当前要求必须提供有效模型路径。")
+        if not os.path.isabs(self.yolo_model_path):
+            # 相对路径按工作区根目录解析
+            self.yolo_model_path = os.path.abspath(os.path.join(os.getcwd(), self.yolo_model_path))
+        if not os.path.isfile(self.yolo_model_path):
+            raise FileNotFoundError(
+                f"模型文件不存在: {self.yolo_model_path}。"
+                "请确认路径（例如 /home/nvidia/stephen/PoseAdapter/model/best.pt）并重新启动。"
+            )
         self.use_paddle_ocr = self.get_parameter('use_paddle_ocr').value
         self.min_bbox_area_ratio = self.get_parameter('min_bbox_area_ratio').value
         self.keypoint_method = self.get_parameter('keypoint_method').value
@@ -238,7 +245,16 @@ class PoseAdapterNode(Node):
     def _load_calib_from_file(self):
         """从标定文件加载相机内参"""
         if not self.calib_file:
-            return
+            raise RuntimeError(
+                "未设置 calib_file。请在 launch 中指定有效的标定文件路径，例如："
+                "/home/nvidia/stephen/PoseAdapter/src/calibrate/calibration_results/rtsp_camera_calib.yaml"
+            )
+
+        if not os.path.isfile(self.calib_file):
+            raise FileNotFoundError(
+                f"标定文件不存在: {self.calib_file}。"
+                "请检查路径是否正确并确认文件已生成。"
+            )
 
         try:
             with open(self.calib_file, 'r') as f:
@@ -260,7 +276,7 @@ class PoseAdapterNode(Node):
 
             self.get_logger().info(f"从标定文件加载相机内参: {self.calib_file}")
         except Exception as e:
-            self.get_logger().warn(f"标定文件加载失败，将使用默认内参: {e}")
+            raise RuntimeError(f"标定文件加载失败: {self.calib_file}，错误: {e}") from e
 
     def _init_camera(self):
         """使用 Unitree SDK 初始化 Go2 前置相机"""
@@ -355,14 +371,33 @@ class PoseAdapterNode(Node):
     def _ros_image_callback(self, msg):
         """ROS 图像话题回调"""
         try:
-            cv_image = self.bridge.imgmsg_to_cv2(msg, desired_encoding='bgr8')
+            cv_image = self._ros_image_to_bgr(msg)
             self.latest_ros_image = cv_image
         except Exception as e:
             self.get_logger().error(f"ROS 图像转换失败: {e}")
 
+    @staticmethod
+    def _ros_image_to_bgr(msg):
+        if msg.encoding not in ("bgr8", "rgb8"):
+            raise ValueError(f"暂不支持图像编码: {msg.encoding}")
+        arr = np.frombuffer(msg.data, dtype=np.uint8).reshape((msg.height, msg.width, 3))
+        if msg.encoding == "rgb8":
+            return cv2.cvtColor(arr, cv2.COLOR_RGB2BGR)
+        return arr
+
+    @staticmethod
+    def _bgr_to_ros_image(frame):
+        msg = Image()
+        msg.height = int(frame.shape[0])
+        msg.width = int(frame.shape[1])
+        msg.encoding = "bgr8"
+        msg.is_bigendian = 0
+        msg.step = int(frame.shape[1] * frame.shape[2])
+        msg.data = frame.tobytes()
+        return msg
+
     def _get_image(self):
-        """获取图像 - 从队列取最新帧"""
-        # 从队列获取最新帧
+        """消费者：优先从队列消费最新 RTSP 帧"""
         try:
             frame = self.frame_queue.get_nowait()
             return frame
@@ -374,6 +409,17 @@ class PoseAdapterNode(Node):
             return self.latest_ros_image.copy()
         
         return None
+
+    def _log_throttle(self, level, key, interval_sec, message):
+        now = time.time()
+        last = self._throttle_ts.get(key, 0.0)
+        if now - last < interval_sec:
+            return
+        self._throttle_ts[key] = now
+        if level == "warn":
+            self.get_logger().warning(message)
+        else:
+            self.get_logger().info(message)
 
     def _select_target(self, tracks):
         """选择追踪目标"""
@@ -444,7 +490,9 @@ class PoseAdapterNode(Node):
                    cv2.FONT_HERSHEY_SIMPLEX, 0.7, (255, 255, 255), 2)
         
         try:
-            debug_msg = self.bridge.cv2_to_imgmsg(debug_image, "bgr8")
+            debug_msg = self._bgr_to_ros_image(debug_image)
+            debug_msg.header.stamp = self.get_clock().now().to_msg()
+            debug_msg.header.frame_id = "camera"
             self.debug_image_pub.publish(debug_msg)
         except Exception as e:
             self.get_logger().error(f"调试图像发布失败: {e}")
@@ -457,7 +505,7 @@ class PoseAdapterNode(Node):
         # 1. 取图
         cv_image = self._get_image()
         if cv_image is None:
-            self.get_logger().warn_throttle(2.0, "[Pipeline] 等待图像...")
+            self._log_throttle("warn", "wait_image", 2.0, "[Pipeline] 等待图像...")
             return
         
         self.image_shape = cv_image.shape[:2]
@@ -502,8 +550,7 @@ class PoseAdapterNode(Node):
         
         # 无目标时停止
         if len(self.current_tracks) == 0:
-            self.get_logger().warn_throttle(2.0, "[Pipeline] 无目标，停止运动")
-            self.controller.stop()
+            self._log_throttle("warn", "no_target_idle", 2.0, "[Pipeline] 无目标，不下发任何控制指令")
             return
         
         # 发布调试图像
@@ -522,7 +569,6 @@ class PoseAdapterNode(Node):
             if target_track is None:
                 self.get_logger().warn("[Pipeline] 丢失目标")
                 self.target_track_id = None
-                self.controller.stop()
                 return
             
             _, bbox, conf = target_track
@@ -535,7 +581,6 @@ class PoseAdapterNode(Node):
                 area_ratio = float(bw * bh) / float(w * h)
                 if area_ratio >= 0.9:
                     self.get_logger().warn(f"[Pipeline] 目标框过大({area_ratio:.2f})")
-                    self.controller.stop()
                     return
             
             # PnP
@@ -571,8 +616,7 @@ class PoseAdapterNode(Node):
             if self.controller.is_ready_for_ocr():
                 self._trigger_ocr(bbox)
         else:
-            self.get_logger().info_throttle(2.0, "[Pipeline] 无目标，保持静止")
-            self.controller.stop()
+            self._log_throttle("info", "no_target_idle", 2.0, "[Pipeline] 无目标，不下发任何控制指令")
         
         # 统计耗时
         pipeline_elapsed = (time.time() - pipeline_start) * 1000

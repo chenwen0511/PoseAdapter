@@ -40,9 +40,64 @@ PoseAdapter/
 | 目的 | 命令 |
 |------|------|
 | 构建包 | `colcon build --packages-select pose_adapter` |
-| 启动 ZSI-1 | `BODY=ZSI-1 ros2 launch pose_adapter pose_adapter.launch` |
+| 后台启动服务 | `./start.sh start` |
+| 查看服务状态 | `./start.sh status` |
+| 停止服务 | `./start.sh stop` |
+| 查看运行日志 | `./start.sh logs` |
+| 启动 ZSI-1（推荐显式参数） | `BODY=ZSI-1 ros2 launch pose_adapter pose_adapter.launch body_type:=ZSI-1` |
 | 启动 GO2 | `BODY=GO2 ros2 launch pose_adapter pose_adapter.launch` |
-| 运行单元测试 | `python3 tests/test_pipeline.py` |
+| 运行单元测试 | `python3.10 tests/test_pipeline.py` |
+
+---
+
+## 修改后重新运行
+
+每次改完代码后，按下面步骤重新生效并启动：
+
+```bash
+cd /home/nvidia/stephen/PoseAdapter
+
+# 1) 重新编译（只编 pose_adapter 包）
+colcon build --packages-select pose_adapter
+
+# 2) 重新加载环境
+source /opt/ros/humble/setup.bash
+source install/setup.bash
+
+# 3) 启动
+BODY=ZSI-1 ros2 launch pose_adapter pose_adapter.launch body_type:=ZSI-1
+# 或
+BODY=GO2 ros2 launch pose_adapter pose_adapter.launch
+```
+
+说明：
+- 若开了新终端，必须重新执行 `source /opt/ros/humble/setup.bash` 和 `source install/setup.bash`。
+- 若启动报 `package 'pose_adapter' not found`，通常是第 2 步没有执行或执行顺序不对。
+- ZSI SDK 仅支持 Python 3.10，本工程所有 Python 命令统一使用 `python3.10`。
+
+若使用服务脚本（推荐）：
+
+```bash
+cd /home/nvidia/stephen/PoseAdapter
+colcon build --packages-select pose_adapter
+./start.sh restart
+./start.sh status
+```
+
+服务日志位置：
+
+- `data/logs/pose_adapter.log`
+
+---
+
+## 运行模式确认（ZSI-1 / GO2 / cmd_vel）
+
+启动后请先看日志里的 `body_type` 与控制模式，判断是否走到预期 SDK：
+
+- 期望 **ZSI-1 SDK**：日志应包含 `body_type: ZSI-1`，并出现 ZSI-1 SDK 初始化信息。
+- 若出现 `body_type: None`，通常没有把 `body_type` 参数正确传入；请使用：
+  `BODY=ZSI-1 ros2 launch pose_adapter pose_adapter.launch body_type:=ZSI-1`
+- 若出现 `No module named 'unitree_sdk2py'` + `回退到 cmd_vel 模式`，表示 Go2 SDK 不可用，当前实际在用 `cmd_vel` 回退控制。
 
 ---
 
@@ -82,10 +137,11 @@ PoseAdapter/
 | 变量 | 默认值 | 说明 |
 |------|--------|------|
 | `BODY` | `ZSI-1` | 机器狗类型 |
-| `ZSI_SDK_ROOT` | `/home/stephen/.openclaw/workspace/zsibot_sdk` | SDK 路径 |
-| `ZSI_LOCAL_IP` | `192.168.1.100` | 本地 IP |
+| `ZSI_SDK_ROOT` | `../zsibot_sdk` | SDK 路径（与 PoseAdapter 同层） |
+| `ZSI_LOCAL_IP` | `192.168.234.15` | 本地 IP |
 | `ZSI_LOCAL_PORT` | `43988` | 本地端口 |
 | `ZSI_DOG_IP` | `192.168.234.1` | 机器狗 IP |
+| `MODEL_FILE` | `model/best.pt` | YOLO 模型路径（相对工程根目录） |
 
 ---
 
@@ -93,6 +149,16 @@ PoseAdapter/
 
 - **图像来源**：RTSP 流（默认 `rtsp://192.168.234.1:8554/test`）
 - **默认内参**：`src/calibrate/calibration_results/rtsp_camera_calib.yaml`
+
+## 模型配置
+
+- **默认模型路径**：`model/best.pt`（相对工程根目录）
+- 启动时会校验模型文件是否存在；不存在将直接报错退出
+- 也可通过环境变量覆盖：
+
+```bash
+MODEL_FILE=/home/nvidia/stephen/PoseAdapter/model/best.pt ./start.sh start
+```
 
 ---
 
@@ -114,7 +180,7 @@ keypoint_method:=contour ros2 launch pose_adapter pose_adapter.launch
 
 ```bash
 # 单元测试
-python3 tests/test_pipeline.py
+python3.10 tests/test_pipeline.py
 
 # 输出示例：
 # === 测试 1: 检测器 ===
