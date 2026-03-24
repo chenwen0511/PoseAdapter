@@ -14,6 +14,9 @@ from rclpy.qos import QoSProfile, ReliabilityPolicy, HistoryPolicy
 from geometry_msgs.msg import Twist
 from cv_bridge import CvBridge
 import cv2
+import queue
+import threading
+import time
 import numpy as np
 import yaml
 
@@ -44,6 +47,9 @@ class PoseAdapterNode(Node):
         
         # OpenCV 视频捕获
         self.cap = None
+        self.frame_queue = queue.Queue(maxsize=1)  # 保持最新一帧
+        self.vision_thread = None
+        self.vision_running = False
         
         # 参数
         self._load_params()
@@ -186,15 +192,48 @@ class PoseAdapterNode(Node):
         self._debug_image_interval = 5
 
     def _init_rtsp_stream(self):
-        """初始化 RTSP 视频流"""
+        """初始化 RTSP 视频流并启动生产者线程"""
         self.cap = cv2.VideoCapture(self.rtsp_url)
         if not self.cap.isOpened():
             self.get_logger().error(f"无法打开 RTSP 流: {self.rtsp_url}")
             self.cap = None
-        else:
-            # 设置低延迟
-            self.cap.set(cv2.CAP_PROP_BUFFERSIZE, 1)
-            self.get_logger().info(f"RTSP 流已打开: {self.rtsp_url}")
+            return
+        
+        # 设置低延迟
+        self.cap.set(cv2.CAP_PROP_BUFFERSIZE, 1)
+        self.get_logger().info(f"RTSP 流已打开: {self.rtsp_url}")
+        
+        # 启动生产者线程
+        self.vision_running = True
+        self.vision_thread = threading.Thread(target=self._vision_loop, daemon=True)
+        self.vision_thread.start()
+        self.get_logger().info("视觉生产者线程已启动")
+    
+    def _vision_loop(self):
+        """生产者线程：持续从 RTSP 拉流"""
+        while self.vision_running:
+            if self.cap is None or not self.cap.isOpened():
+                self.get_logger().warn("RTSP 流断开，尝试重连...")
+                self.cap = cv2.VideoCapture(self.rtsp_url)
+                if self.cap:
+                    self.cap.set(cv2.CAP_PROP_BUFFERSIZE, 1)
+                time.sleep(1)
+                continue
+            
+            ret, frame = self.cap.read()
+            if ret and frame is not None:
+                # 入队，丢弃旧帧
+                try:
+                    if self.frame_queue.full():
+                        self.frame_queue.get_nowait()
+                except queue.Empty:
+                    pass
+                self.frame_queue.put(frame)
+            else:
+                self.get_logger().warn("RTSP 读取失败，尝试重连...")
+                self.cap = cv2.VideoCapture(self.rtsp_url)
+                self.cap.set(cv2.CAP_PROP_BUFFERSIZE, 1)
+                time.sleep(0.5)
     
     def _load_calib_from_file(self):
         """从标定文件加载相机内参"""
@@ -322,30 +361,17 @@ class PoseAdapterNode(Node):
             self.get_logger().error(f"ROS 图像转换失败: {e}")
 
     def _get_image(self):
-        """获取图像 - 优先使用 RTSP 流"""
-        # 优先使用 RTSP 流
-        if self.cap is not None and self.cap.isOpened():
-            ret, frame = self.cap.read()
-            if ret and frame is not None:
-                return frame
-            else:
-                # 重连
-                self.get_logger().warn("RTSP 流断开，尝试重连...")
-                self.cap = cv2.VideoCapture(self.rtsp_url)
-                self.cap.set(cv2.CAP_PROP_BUFFERSIZE, 1)
-                ret, frame = self.cap.read()
-                if ret and frame is not None:
-                    return frame
+        """获取图像 - 从队列取最新帧"""
+        # 从队列获取最新帧
+        try:
+            frame = self.frame_queue.get_nowait()
+            return frame
+        except queue.Empty:
+            pass
         
         # 回退到 ROS 话题
         if self.camera_image_topic and self.latest_ros_image is not None:
             return self.latest_ros_image.copy()
-        
-        # 可选：使用 Go2 SDK 取流
-        if self.camera_handler and self.camera_handler.is_available():
-            frame = self.camera_handler.get_image_frame()
-            if frame is not None:
-                return frame
         
         return None
 
@@ -570,6 +596,14 @@ class PoseAdapterNode(Node):
     def shutdown(self):
         """关闭节点"""
         self.is_running = False
+        
+        # 停止视觉生产者线程
+        self.vision_running = False
+        if self.vision_thread:
+            self.vision_thread.join(timeout=2.0)
+        if self.cap:
+            self.cap.release()
+        
         if self.controller:
             self.controller.is_running = False
             self.controller.stop()
