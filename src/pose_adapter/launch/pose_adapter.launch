@@ -35,8 +35,8 @@
   <!-- 图像来源：与 calibrate 一致，默认 /camera/image_raw（由其他节点发布相机 raw 图） -->
   <arg name="camera_image_topic" default="/camera/image_raw"/>
 
-  <!-- 标定文件：留空则使用节点内默认内参；指定路径则从文件加载 -->
-  <arg name="calib_file" default=""/>
+  <!-- 标定文件：默认使用 ZSI-1 RTSP 相机内参 -->
+  <arg name="calib_file" default="$(find-pkg-share pose_adapter)/../calibrate/calibration_results/rtsp_camera_calib.yaml"/>
 
   <!-- 运动前提：关闭避障 + 经典步态。SDK 支持时启动是否尝试关闭避障 -->
   <arg name="disable_obstacle_avoidance_on_start" default="true"/>
