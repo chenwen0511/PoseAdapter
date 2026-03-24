@@ -10,7 +10,7 @@ import os
 import rclpy
 from rclpy.node import Node
 from rclpy.qos import QoSProfile, ReliabilityPolicy, HistoryPolicy
-from sensor_msgs.msg import Image
+# from sensor_msgs.msg import Image  # RTSP 模式不需要
 from geometry_msgs.msg import Twist
 from cv_bridge import CvBridge
 import cv2
@@ -41,6 +41,9 @@ class PoseAdapterNode(Node):
         super().__init__('pose_adapter')
         
         self.get_logger().info(f"节点运行 Python: {sys.executable}")
+        
+        # OpenCV 视频捕获
+        self.cap = None
         
         # 参数
         self._load_params()
@@ -142,6 +145,9 @@ class PoseAdapterNode(Node):
         
         # 保存路径
         self.declare_parameter('image_save_path', '/tmp/pose_adapter_images')
+        
+        # RTSP 流
+        self.declare_parameter('rtsp_url', 'rtsp://192.168.234.1:8554/test')
 
         # 获取参数值
         self.camera_width = self.get_parameter('camera_width').value
@@ -172,12 +178,24 @@ class PoseAdapterNode(Node):
         self.step_angle = self.get_parameter('step_angle').value
         self.camera_image_topic = self.get_parameter('camera_image_topic').value
         self.image_save_path = self.get_parameter('image_save_path').value
+        self.rtsp_url = self.get_parameter('rtsp_url').value
 
         # 性能统计
         self._total_loop_time = 0.0
         self._loop_count = 0
         self._debug_image_interval = 5
 
+    def _init_rtsp_stream(self):
+        """初始化 RTSP 视频流"""
+        self.cap = cv2.VideoCapture(self.rtsp_url)
+        if not self.cap.isOpened():
+            self.get_logger().error(f"无法打开 RTSP 流: {self.rtsp_url}")
+            self.cap = None
+        else:
+            # 设置低延迟
+            self.cap.set(cv2.CAP_PROP_BUFFERSIZE, 1)
+            self.get_logger().info(f"RTSP 流已打开: {self.rtsp_url}")
+    
     def _load_calib_from_file(self):
         """从标定文件加载相机内参"""
         if not self.calib_file:
@@ -229,19 +247,14 @@ class PoseAdapterNode(Node):
         self.cmd_vel_pub = self.create_publisher(Twist, '/cmd_vel', qos)
         self.debug_image_pub = self.create_publisher(Image, '/pose_adapter/debug_image', qos)
 
-        # 订阅图像话题
-        if self.camera_image_topic:
-            self.image_sub = self.create_subscription(
-                Image,
-                self.camera_image_topic,
-                self._ros_image_callback,
-                qos
-            )
-            self.get_logger().info(f"图像来源: {self.camera_image_topic}")
-        else:
-            self.image_sub = None
+        # RTSP 模式：不再订阅 ROS 话题
+        # 图像通过 RTSP 流直接获取
+        self.get_logger().info(f"图像来源: RTSP ({self.rtsp_url})")
 
         self.get_logger().info("使用同步顺序执行：取图 → 检测 → 追踪 → PnP → 控制(等待完成) → 循环")
+        
+        # 初始化 RTSP 视频流
+        self._init_rtsp_stream()
 
     def _init_modules(self):
         """初始化各模块"""
@@ -309,8 +322,22 @@ class PoseAdapterNode(Node):
             self.get_logger().error(f"ROS 图像转换失败: {e}")
 
     def _get_image(self):
-        """获取图像"""
-        # 优先从话题取帧
+        """获取图像 - 优先使用 RTSP 流"""
+        # 优先使用 RTSP 流
+        if self.cap is not None and self.cap.isOpened():
+            ret, frame = self.cap.read()
+            if ret and frame is not None:
+                return frame
+            else:
+                # 重连
+                self.get_logger().warn("RTSP 流断开，尝试重连...")
+                self.cap = cv2.VideoCapture(self.rtsp_url)
+                self.cap.set(cv2.CAP_PROP_BUFFERSIZE, 1)
+                ret, frame = self.cap.read()
+                if ret and frame is not None:
+                    return frame
+        
+        # 回退到 ROS 话题
         if self.camera_image_topic and self.latest_ros_image is not None:
             return self.latest_ros_image.copy()
         
