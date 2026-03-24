@@ -1,12 +1,6 @@
 #!/usr/bin/env python3
-# -*- coding: utf-8 -*-
 """
-基于 OpenCV 的相机标定脚本（不依赖 ROS cameracalibrator GUI）
-订阅 /camera/image_raw，用棋盘格采集多张图后计算内参并保存为 yaml。
-用法（需先 source ROS2）：
-  python3 calibrate_opencv.py --topic /camera/image_raw --size 8x5 --square 0.025 --out calib_result.yaml
-交互：窗口里按 s 采集当前帧，采够约 15 张后按 c 标定并保存，按 q 退出。
-若无窗口：加 --headless 自动每隔约 2 秒采一帧，采够 20 张后自动标定保存。
+ROS2 Humble OpenCV 标定工具，订阅图像话题做棋盘格标定。
 """
 import argparse
 import sys
@@ -15,21 +9,15 @@ import yaml
 import numpy as np
 import cv2
 
-try:
-    import rclpy
-    from rclpy.node import Node
-    from sensor_msgs.msg import Image
-    from cv_bridge import CvBridge
-except ImportError as e:
-    print("请先 source ROS2 环境，例如: source /opt/ros/foxy/setup.bash")
-    print("错误:", e)
-    sys.exit(1)
+import rclpy
+from rclpy.node import Node
+from sensor_msgs.msg import Image
 
 # 棋盘格内角点数量（宽 x 高）
 GRID_COLS = 8
 GRID_ROWS = 5
 SQUARE_SIZE = 0.025  # 方格边长，米
-OUTPUT_YAML = "calib_result.yaml"
+OUTPUT_YAML = "rtsp_camera_calib.yaml"
 IMAGE_TOPIC = "/camera/image_raw"
 HEADLESS = False
 
@@ -44,6 +32,13 @@ def get_object_points(cols, rows, square_size):
 
 def save_calib_yaml(path, K, dist, width, height, camera_name="camera"):
     """保存为与 read_calib_params / default_camera_calib 兼容的 yaml"""
+    k_list = [float(x) for x in K.flatten()]
+    dist_list = [float(x) for x in dist.flatten()]
+    proj_list = [
+        float(K[0, 0]), float(K[0, 1]), float(K[0, 2]), 0.0,
+        float(K[1, 0]), float(K[1, 1]), float(K[1, 2]), 0.0,
+        float(K[2, 0]), float(K[2, 1]), float(K[2, 2]), 0.0,
+    ]
     data = {
         "image_width": int(width),
         "image_height": int(height),
@@ -51,10 +46,10 @@ def save_calib_yaml(path, K, dist, width, height, camera_name="camera"):
         "camera_matrix": {
             "rows": 3,
             "cols": 3,
-            "data": K.flatten().tolist(),
+            "data": k_list,
         },
         "distortion_model": "plumb_bob",
-        "distortion_coefficients": {"rows": 1, "cols": 5, "data": dist.flatten().tolist()},
+        "distortion_coefficients": {"rows": 1, "cols": 5, "data": dist_list},
         "rectification_matrix": {
             "rows": 3,
             "cols": 3,
@@ -63,7 +58,7 @@ def save_calib_yaml(path, K, dist, width, height, camera_name="camera"):
         "projection_matrix": {
             "rows": 3,
             "cols": 4,
-            "data": list(K[0, :]) + [0.0] + list(K[1, :]) + [0.0] + list(K[2, :]) + [0.0],
+            "data": proj_list,
         },
     }
     with open(path, "w") as f:
@@ -71,8 +66,19 @@ def save_calib_yaml(path, K, dist, width, height, camera_name="camera"):
     print(f"已保存: {path}")
 
 
+def ros_image_to_bgr(msg: Image) -> np.ndarray:
+    if msg.encoding not in ("bgr8", "rgb8"):
+        raise ValueError(f"暂不支持的编码: {msg.encoding}，请使用 bgr8/rgb8")
+    channels = 3
+    arr = np.frombuffer(msg.data, dtype=np.uint8)
+    img = arr.reshape((msg.height, msg.width, channels))
+    if msg.encoding == "rgb8":
+        img = cv2.cvtColor(img, cv2.COLOR_RGB2BGR)
+    return img
+
+
 class CalibNode(Node):
-    def __init__(self, topic, grid_cols, grid_rows, square_size, out_path, headless):
+    def __init__(self, topic, grid_cols, grid_rows, square_size, out_path, headless, camera_name):
         super().__init__("calibrate_opencv_node")
         self.topic = topic
         self.grid_cols = grid_cols
@@ -80,7 +86,7 @@ class CalibNode(Node):
         self.square_size = square_size
         self.out_path = out_path
         self.headless = headless
-        self.bridge = CvBridge()
+        self.camera_name = camera_name
         self.latest_image = None
         self.obj_points = get_object_points(grid_cols, grid_rows, square_size)
         self.all_object_points = []
@@ -91,7 +97,7 @@ class CalibNode(Node):
 
     def _callback(self, msg):
         try:
-            self.latest_image = self.bridge.imgmsg_to_cv2(msg, "bgr8")
+            self.latest_image = ros_image_to_bgr(msg)
             if self.image_size is None:
                 h, w = self.latest_image.shape[:2]
                 self.image_size = (w, h)
@@ -178,16 +184,18 @@ class CalibNode(Node):
             dist,
             self.image_size[0],
             self.image_size[1],
+            camera_name=self.camera_name,
         )
 
 
 def main():
     global GRID_COLS, GRID_ROWS, SQUARE_SIZE, OUTPUT_YAML, IMAGE_TOPIC, HEADLESS
-    parser = argparse.ArgumentParser(description="OpenCV 相机标定（订阅 ROS2 图像）")
+    parser = argparse.ArgumentParser(description="OpenCV 相机标定（ROS2）")
     parser.add_argument("--topic", "-t", default=IMAGE_TOPIC, help="图像话题")
     parser.add_argument("--size", "-s", default="8x5", help="棋盘格内角点 宽x高，如 8x5")
     parser.add_argument("--square", default=0.025, type=float, help="方格边长(米)")
     parser.add_argument("--out", "-o", default=OUTPUT_YAML, help="输出 yaml 路径")
+    parser.add_argument("--camera-name", default="rtsp_camera", help="写入 yaml 的 camera_name")
     parser.add_argument("--headless", action="store_true", help="无窗口，自动定时采集后标定")
     args = parser.parse_args()
     w, h = args.size.lower().split("x")
@@ -198,7 +206,15 @@ def main():
     HEADLESS = args.headless
 
     rclpy.init()
-    node = CalibNode(IMAGE_TOPIC, GRID_COLS, GRID_ROWS, SQUARE_SIZE, OUTPUT_YAML, HEADLESS)
+    node = CalibNode(
+        IMAGE_TOPIC,
+        GRID_COLS,
+        GRID_ROWS,
+        SQUARE_SIZE,
+        OUTPUT_YAML,
+        HEADLESS,
+        args.camera_name,
+    )
     try:
         if HEADLESS:
             node.run_headless()

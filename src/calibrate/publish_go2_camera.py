@@ -1,176 +1,128 @@
 #!/usr/bin/env python3
-# -*- coding: utf-8 -*-
 """
-将 Go2 前置相机（Unitree SDK）图像发布到 ROS1 话题 /camera/image_raw。
-与 pose_adapter（ROS1）同机使用时无需桥接，adapter 可直接订阅。
-
-用法（需先 source ROS1 Noetic，且安装 unitree_sdk2py、opencv）：
-  在 conda 的 task 环境中可用 python 或 python3.8（若遇 cyclonedds 冲突见文档）。
-  export CYCLONEDDS_HOME=/home/unitree/cyclonedds/install  # Unitree SDK 依赖
-  source /opt/ros/noetic/setup.bash
-  python publish_go2_camera.py --no-network-interface
-
-查看话题：rostopic hz /camera/image_raw
+ROS2 Humble RTSP 相机发布节点（OpenCV 拉流 -> /camera/image_raw）。
 """
-import os
-import sys
 import argparse
-import threading
-import queue
+import os
+import time
 
-# Unitree SDK 依赖 CycloneDDS，需在 import 前设置（可覆盖）
-os.environ.setdefault("CYCLONEDDS_HOME", "/home/unitree/cyclonedds/install")
+import cv2
+import rclpy
+from rclpy.node import Node
+from sensor_msgs.msg import Image
 
-try:
-    import rospy
-    from sensor_msgs.msg import Image
-    import cv2
-    import numpy as np
-    try:
-        cv2.setLogLevel(cv2.LOG_LEVEL_ERROR)  # 抑制 "Corrupt JPEG data" 等解码警告
-    except AttributeError:
-        pass
-except ImportError as e:
-    err = str(e)
-    if "foxy" in err or "humble" in err or "rosgraph_msgs" in err:
-        print("当前为 ROS2 环境，本脚本需 ROS1。请勿 source ROS2，只执行: source /opt/ros/noetic/setup.bash")
-    print("请先 source ROS1 并安装依赖。错误:", err)
-    sys.exit(1)
-
-try:
-    from unitree_sdk2py.core.channel import ChannelFactoryInitialize
-    from unitree_sdk2py.go2.video.video_client import VideoClient
-except ImportError as e:
-    err = str(e)
-    if "cyclonedds" in err and "undefined symbol" in err:
-        print("cyclonedds 与 ROS2 冲突时，请勿 source ROS2；仅 source /opt/ros/noetic/setup.bash")
-    else:
-        print("未安装 unitree_sdk2py，无法从 Go2 获取图像。请安装宇树 SDK。")
-    print("实际错误:", err)
-    sys.exit(1)
+DEFAULT_RTSP_URL = "rtsp://192.168.234.1:8554/test"
 
 
-class Go2CameraPublisher:
-    def __init__(self, topic: str):
-        self.topic = topic
-        self.pub = rospy.Publisher(topic, Image, queue_size=10)
-        self.video_client = None
-        self._init_camera()
+class RtspCameraPublisher(Node):
+    def __init__(self, rtsp_url: str, topic: str, fps: float, frame_id: str):
+        super().__init__("rtsp_camera_publisher")
+        self.rtsp_url = rtsp_url
+        self.pub = self.create_publisher(Image, topic, 10)
+        self.frame_id = frame_id
+        self.capture = None
+        self.fail_count = 0
+        self.last_reopen_ts = 0.0
+        self.reopen_interval_sec = 2.0
+        self.reopen_fail_threshold = 10
 
-    def _init_camera(self):
+        self._open_capture()
+
+        timer_period = 1.0 / fps if fps > 0 else 0.1
+        self.timer = self.create_timer(timer_period, self._on_timer)
+        self.get_logger().info(f"RTSP 源: {rtsp_url}")
+        self.get_logger().info(f"发布话题: {topic}")
+
+    def _open_capture(self):
+        if self.capture is not None:
+            self.capture.release()
+            self.capture = None
+
+        # 优先走 TCP，降低网络抖动时的花屏与解码错误概率。
+        os.environ.setdefault("OPENCV_FFMPEG_CAPTURE_OPTIONS", "rtsp_transport;tcp|max_delay;500000")
+        self.capture = cv2.VideoCapture(self.rtsp_url, cv2.CAP_FFMPEG)
+        if not self.capture.isOpened():
+            raise RuntimeError(f"无法打开 RTSP 流: {self.rtsp_url}")
+
+        self.fail_count = 0
+        self.last_reopen_ts = time.time()
+        self.get_logger().info("RTSP 连接已建立。")
+
+    def _maybe_reopen_capture(self):
+        now = time.time()
+        if now - self.last_reopen_ts < self.reopen_interval_sec:
+            return
         try:
-            self.video_client = VideoClient()
-            self.video_client.SetTimeout(0.1)
-            self.video_client.Init()
-            rospy.loginfo("Go2 相机初始化成功，开始发布: %s" % self.topic)
+            self.get_logger().warn("检测到连续解码失败，尝试重连 RTSP 流。")
+            self._open_capture()
         except Exception as e:
-            rospy.logerr("相机初始化失败: %s" % e)
-            self.video_client = None
+            self.last_reopen_ts = now
+            self.get_logger().warn(f"RTSP 重连失败: {e}")
 
-    def get_frame(self):
-        if not self.video_client:
-            return None
-        try:
-            code, data = self.video_client.GetImageSample()
-            if code != 0:
-                return None
-            image_data = np.frombuffer(bytes(data), dtype=np.uint8)
-            image = cv2.imdecode(image_data, cv2.IMREAD_COLOR)
-            if image is None:
-                image = cv2.imdecode(image_data, cv2.IMREAD_UNCHANGED)
-                if image is not None and len(image.shape) == 2:
-                    image = cv2.cvtColor(image, cv2.COLOR_GRAY2BGR)
-            return image
-        except Exception:
-            return None
+    def _on_timer(self):
+        if not rclpy.ok():
+            return
+        if self.capture is None:
+            self._maybe_reopen_capture()
+            return
 
-    def _frame_to_imgmsg(self, frame: np.ndarray) -> Image:
-        """将 BGR numpy 转为 sensor_msgs/Image"""
+        ok, frame = self.capture.read()
+        if not ok or frame is None:
+            self.fail_count += 1
+            self.get_logger().warn("读取 RTSP 帧失败，跳过本帧。", throttle_duration_sec=2.0)
+            if self.fail_count >= self.reopen_fail_threshold:
+                self._maybe_reopen_capture()
+            return
+        self.fail_count = 0
+
         msg = Image()
-        msg.header.stamp = rospy.Time.now()
-        msg.header.frame_id = "camera"
         msg.height = int(frame.shape[0])
         msg.width = int(frame.shape[1])
         msg.encoding = "bgr8"
         msg.is_bigendian = 0
         msg.step = int(frame.shape[1] * frame.shape[2])
-        msg.data = frame.ravel().tobytes()
-        return msg
+        msg.data = frame.tobytes()
+        msg.header.stamp = self.get_clock().now().to_msg()
+        msg.header.frame_id = self.frame_id
+        try:
+            self.pub.publish(msg)
+        except Exception as e:
+            # 进程退出阶段可能出现 context invalid，忽略即可。
+            self.get_logger().debug(f"发布失败（退出阶段可忽略）: {e}")
 
-    def _grab_loop(self, frame_queue):
-        """单独线程中取图，避免 GetImageSample() 阻塞主循环"""
-        while getattr(self, "_grab_running", True):
-            frame = self.get_frame()
-            try:
-                frame_queue.put_nowait(frame)
-            except queue.Full:
-                try:
-                    frame_queue.get_nowait()
-                except queue.Empty:
-                    pass
-                try:
-                    frame_queue.put_nowait(frame)
-                except queue.Full:
-                    pass
-
-    def run(self, hz: float = 10.0):
-        frame_queue = queue.Queue(maxsize=1)
-        self._grab_running = True
-        grab_thread = threading.Thread(target=self._grab_loop, args=(frame_queue,), daemon=True)
-        grab_thread.start()
-        # 发布频率下限做一个保护，避免 0 或负数
-        hz = float(hz) if hz and hz > 0 else 10.0
-        rospy.loginfo("取图已在后台线程运行，发布频率约为 %.1f Hz" % hz)
-        pub_count = 0
-        wait_count = 0
-        rate = rospy.Rate(hz)
-        while not rospy.is_shutdown():
-            try:
-                frame = frame_queue.get(timeout=0.5)
-            except queue.Empty:
-                wait_count += 1
-                if wait_count % 2 == 0:
-                    rospy.loginfo("等待图像… (已发布 %d 帧)" % pub_count)
-                rate.sleep()
-                continue
-            wait_count = 0
-            if frame is not None:
-                self.pub.publish(self._frame_to_imgmsg(frame))
-                pub_count += 1
-                if pub_count % 30 == 0:
-                    rospy.loginfo("已发布 %d 帧" % pub_count)
-            rate.sleep()
+    def destroy_node(self):
+        if self.capture is not None:
+            self.capture.release()
+        super().destroy_node()
 
 
 def main():
-    parser = argparse.ArgumentParser(description="发布 Go2 相机图像到 ROS1 话题")
-    parser.add_argument("--topic", "-t", default="/camera/image_raw", help="发布的话题名")
-    parser.add_argument("--network-interface", "-n", default="", help="DDS 网卡，如 eth0")
-    parser.add_argument("--no-network-interface", action="store_true", help="不指定网卡，仅用 ChannelFactoryInitialize(0)")
-    parser.add_argument("--hz", type=float, default=10.0, help="发布频率 Hz（默认 10.0）")
+    parser = argparse.ArgumentParser(description="ROS2 RTSP 相机发布器")
+    parser.add_argument("--rtsp-url", default=DEFAULT_RTSP_URL, help="RTSP 拉流地址")
+    parser.add_argument("--topic", "-t", default="/camera/image_raw", help="发布图像话题")
+    parser.add_argument("--fps", type=float, default=15.0, help="发布频率")
+    parser.add_argument("--frame-id", default="camera", help="图像帧 frame_id")
+    parser.add_argument("--reconnect-threshold", type=int, default=10, help="连续读帧失败多少次后尝试重连")
+    parser.add_argument("--reconnect-interval", type=float, default=2.0, help="两次重连尝试最小间隔(秒)")
     args = parser.parse_args()
 
-    # 必须在 rospy.init_node 之前初始化 Unitree DDS
+    rclpy.init()
+    node = None
     try:
-        if args.no_network_interface or not args.network_interface:
-            ChannelFactoryInitialize(0)
-            print("[DDS] 已初始化: ChannelFactoryInitialize(0)")
-        else:
-            ChannelFactoryInitialize(0, args.network_interface)
-            print("[DDS] 已初始化: ChannelFactoryInitialize(0, %s)" % args.network_interface)
-    except Exception as e:
-        print("DDS 初始化失败:", e)
-        print("请尝试: python publish_go2_camera.py --no-network-interface")
-        sys.exit(1)
-
-    rospy.init_node("go2_camera_publisher", anonymous=False)
-    node = Go2CameraPublisher(args.topic)
-    try:
-        node.run(hz=args.hz)
-    except rospy.ROSInterruptException:
-        pass
+        node = RtspCameraPublisher(
+            rtsp_url=args.rtsp_url,
+            topic=args.topic,
+            fps=args.fps,
+            frame_id=args.frame_id,
+        )
+        node.reopen_fail_threshold = max(1, int(args.reconnect_threshold))
+        node.reopen_interval_sec = max(0.5, float(args.reconnect_interval))
+        rclpy.spin(node)
     finally:
-        node._grab_running = False
+        if node is not None:
+            node.destroy_node()
+        if rclpy.ok():
+            rclpy.shutdown()
 
 
 if __name__ == "__main__":

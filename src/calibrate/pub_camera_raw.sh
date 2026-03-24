@@ -1,12 +1,16 @@
-conda activate task
+#!/bin/bash
+set -e
 
-export CYCLONEDDS_HOME=/home/unitree/cyclonedds/install
+[ -f /opt/ros/humble/setup.bash ] && source /opt/ros/humble/setup.bash
 
-# 仅加载 ROS1（勿 source ROS2，避免 cyclonedds 冲突）
-source /opt/ros/noetic/setup.bash
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+cd "$SCRIPT_DIR"
 
-# 若用 conda 且 unitree_sdk2py 在 task：conda activate task
-cd /home/unitree/stephen/PoseAdapter/src/calibrate
+RTSP_URL="${RTSP_URL:-rtsp://192.168.234.1:8554/test}"
+CAMERA_TOPIC="${CAMERA_TOPIC:-/camera/image_raw}"
+FPS="${FPS:-15}"
 
-# 启动相机发布（保持运行）
-python publish_go2_camera.py --no-network-interface --hz 2
+python3 publish_go2_camera.py \
+  --rtsp-url "$RTSP_URL" \
+  --topic "$CAMERA_TOPIC" \
+  --fps "$FPS"
