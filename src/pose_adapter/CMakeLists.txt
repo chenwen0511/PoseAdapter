@@ -1,42 +1,37 @@
-cmake_minimum_required(VERSION 3.0.2)
+cmake_minimum_required(VERSION 3.8)
 project(pose_adapter)
 
-find_package(catkin REQUIRED COMPONENTS
-  rospy
-  std_msgs
-  geometry_msgs
-  sensor_msgs
-  cv_bridge
-  image_transport
-  tf
-  dynamic_reconfigure
-)
+if(CMAKE_COMPILER_IS_GNUCXX OR CMAKE_CXX_COMPILER_ID MATCHES "Clang")
+  add_compile_options(-Wall -Wextra -Wpedantic)
+endif()
 
-catkin_python_setup()
+# Find dependencies
+find_package(ament_cmake REQUIRED)
+find_package(ament_cmake_python REQUIRED)
+find_package(rclpy REQUIRED)
+find_package(std_msgs REQUIRED)
+find_package(geometry_msgs REQUIRED)
+find_package(sensor_msgs REQUIRED)
+find_package(cv_bridge REQUIRED)
+find_package(image_transport REQUIRED)
 
-catkin_package(
-  CATKIN_DEPENDS
-    rospy
-    std_msgs
-    geometry_msgs
-    sensor_msgs
-    cv_bridge
-    image_transport
-    tf
-    dynamic_reconfigure
-)
+# Install Python modules
+ament_python_install_package(${PROJECT_NAME})
 
+# Install Python executables
 install(PROGRAMS
-  scripts/pose_adapter_node.py
-  DESTINATION ${CATKIN_PACKAGE_BIN_DESTINATION}
+  src/pose_adapter/pose_adapter_node.py
+  DESTINATION lib/${PROJECT_NAME}
 )
 
-install(DIRECTORY
-  launch/
-  DESTINATION ${CATKIN_PACKAGE_SHARE_DESTINATION}/launch
+# Install launch files
+install(DIRECTORY launch
+  DESTINATION share/${PROJECT_NAME}
 )
 
-install(DIRECTORY
-  config/
-  DESTINATION ${CATKIN_PACKAGE_SHARE_DESTINATION}/config
+# Install config files
+install(DIRECTORY config
+  DESTINATION share/${PROJECT_NAME}
 )
+
+ament_package()

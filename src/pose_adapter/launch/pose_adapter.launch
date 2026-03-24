@@ -1,5 +1,5 @@
 <launch>
-  <!-- Pose Adapter - 电表巡检主节点 -->
+  <!-- Pose Adapter - 电表巡检主节点 (ROS2 Humble) -->
 
   <!-- 相机参数 -->
   <arg name="camera_width" default="1280"/>
@@ -35,10 +35,10 @@
   <!-- 图像来源：与 calibrate 一致，默认 /camera/image_raw（由其他节点发布相机 raw 图） -->
   <arg name="camera_image_topic" default="/camera/image_raw"/>
 
-  <!-- 标定文件：留空则使用节点内默认内参；指定路径则从文件加载（如 $(find pose_adapter)/config/default_camera_calib.yaml） -->
+  <!-- 标定文件：留空则使用节点内默认内参；指定路径则从文件加载 -->
   <arg name="calib_file" default=""/>
 
-  <!-- 运动前提：关闭避障 + 经典步态。SDK 支持时启动是否尝试关闭避障（未支持时请 APP 或 ros2 go2 obstacles_avoidance stop） -->
+  <!-- 运动前提：关闭避障 + 经典步态。SDK 支持时启动是否尝试关闭避障 -->
   <arg name="disable_obstacle_avoidance_on_start" default="true"/>
   <!-- 步态：use_classic_walk=true 时稀碎步；false 时用默认步态便于走步。speed_level：-1=慢 0=普通 1=快 -->
   <arg name="use_classic_walk" default="false"/>
@@ -54,38 +54,38 @@
   <arg name="body_type" default=""/>
 
   <!-- Pose Adapter 主节点 -->
-  <node name="pose_adapter" pkg="pose_adapter" type="pose_adapter_node.py" output="screen">
-    <param name="camera_width" value="$(arg camera_width)"/>
-    <param name="camera_height" value="$(arg camera_height)"/>
-    <param name="meter_width" value="$(arg meter_width)"/>
-    <param name="meter_height" value="$(arg meter_height)"/>
-    <param name="target_distance" value="$(arg target_distance)"/>
-    <param name="distance_tolerance" value="$(arg distance_tolerance)"/>
-    <param name="target_ratio" value="$(arg target_ratio)"/>
-    <param name="yolo_model_path" value="$(arg yolo_model_path)"/>
-    <param name="use_paddle_ocr" value="$(arg use_paddle_ocr)"/>
-    <param name="min_bbox_area_ratio" value="$(arg min_bbox_area_ratio)"/>
-    <param name="keypoint_method" value="$(arg keypoint_method)"/>
-    <param name="calib_file" value="$(arg calib_file)"/>
-    <param name="use_go2_camera" value="$(arg use_go2_camera)"/>
-    <param name="network_interface" value="$(arg network_interface)"/>
-    <param name="camera_image_topic" value="$(arg camera_image_topic)"/>
-    <param name="loop_hz" value="$(arg loop_hz)"/>
-    <param name="disable_obstacle_avoidance_on_start" value="$(arg disable_obstacle_avoidance_on_start)"/>
-    <param name="use_classic_walk" value="$(arg use_classic_walk)"/>
-    <param name="speed_level" value="$(arg speed_level)"/>
-    <param name="max_linear_speed" value="$(arg max_linear_speed)"/>
-    <param name="min_linear_speed" value="$(arg min_linear_speed)"/>
-    <param name="max_angular_speed" value="$(arg max_angular_speed)"/>
-    <param name="step_distance" value="$(arg step_distance)"/>
-    <param name="step_angle" value="$(arg step_angle)"/>
-    <param name="body_type" value="$(arg body_type)"/>
+  <node name="pose_adapter" pkg="pose_adapter" exec="pose_adapter_node" output="screen">
+    <param name="camera_width" value="$(var camera_width)"/>
+    <param name="camera_height" value="$(var camera_height)"/>
+    <param name="meter_width" value="$(var meter_width)"/>
+    <param name="meter_height" value="$(var meter_height)"/>
+    <param name="target_distance" value="$(var target_distance)"/>
+    <param name="distance_tolerance" value="$(var distance_tolerance)"/>
+    <param name="target_ratio" value="$(var target_ratio)"/>
+    <param name="yolo_model_path" value="$(var yolo_model_path)"/>
+    <param name="use_paddle_ocr" value="$(var use_paddle_ocr)"/>
+    <param name="min_bbox_area_ratio" value="$(var min_bbox_area_ratio)"/>
+    <param name="keypoint_method" value="$(var keypoint_method)"/>
+    <param name="calib_file" value="$(var calib_file)"/>
+    <param name="use_go2_camera" value="$(var use_go2_camera)"/>
+    <param name="network_interface" value="$(var network_interface)"/>
+    <param name="camera_image_topic" value="$(var camera_image_topic)"/>
+    <param name="loop_hz" value="$(var loop_hz)"/>
+    <param name="disable_obstacle_avoidance_on_start" value="$(var disable_obstacle_avoidance_on_start)"/>
+    <param name="use_classic_walk" value="$(var use_classic_walk)"/>
+    <param name="speed_level" value="$(var speed_level)"/>
+    <param name="max_linear_speed" value="$(var max_linear_speed)"/>
+    <param name="min_linear_speed" value="$(var min_linear_speed)"/>
+    <param name="max_angular_speed" value="$(var max_angular_speed)"/>
+    <param name="step_distance" value="$(var step_distance)"/>
+    <param name="step_angle" value="$(var step_angle)"/>
+    <param name="body_type" value="$(var body_type)"/>
   </node>
 
   <!-- 图像查看（可选，无显示器时需设为 false） -->
   <arg name="show_debug_image" default="false"/>
-  <group if="$(arg show_debug_image)">
-    <node name="image_view" pkg="image_view" type="image_view" output="screen">
+  <group if="$(var show_debug_image)">
+    <node name="image_view" pkg="image_view" exec="image_view" output="screen">
       <remap from="image" to="/pose_adapter/debug_image"/>
     </node>
   </group>

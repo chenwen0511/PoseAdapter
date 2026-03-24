@@ -1,12 +1,11 @@
-#!/usr/bin/env python
+#!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-位姿解算器 - 基于 PnP 的 6DoF 位姿估计
+位姿解算器 - 基于 PnP 的 6DoF 位姿估计 (ROS2 版本)
 """
 
 import cv2
 import numpy as np
-import rospy
 import time
 
 
@@ -17,7 +16,7 @@ class PoseSolver:
     通过电表关键点（2D）和已知物理尺寸（3D）解算相机相对电表的位姿
     """
     
-    def __init__(self, camera_matrix, dist_coeffs, meter_size=(0.2, 0.3)):
+    def __init__(self, camera_matrix, dist_coeffs, meter_size=(0.2, 0.3), logger=None):
         """
         初始化位姿解算器
         
@@ -25,12 +24,14 @@ class PoseSolver:
             camera_matrix: 3x3 相机内参矩阵
             dist_coeffs: 畸变系数
             meter_size: (width, height) 电表物理尺寸（米）
+            logger: ROS2 节点日志器（可选）
         """
         self.K = np.array(camera_matrix, dtype=np.float64)
         self.dist_coeffs = np.array(dist_coeffs, dtype=np.float64)
         self.meter_width, self.meter_height = meter_size
+        self.logger = logger
         
-        # 构建电表 3D 点（假设电表是平面矩形，中心在原点）
+        # 构建电表 3D 点
         w, h = self.meter_width / 2, self.meter_height / 2
         self.object_points = np.array([
             [-w, -h, 0],   # 左下
@@ -39,53 +40,41 @@ class PoseSolver:
             [-w, h, 0]     # 左上
         ], dtype=np.float64)
         
-        # 位姿平滑滤波
         self.pose_history = []
         self.history_size = 5
         
-        # 耗时统计
         self._total_time = 0.0
         self._count = 0
     
+    def _loginfo(self, msg):
+        if self.logger:
+            self.logger.info(msg)
+        else:
+            print(f"[INFO] {msg}")
+    
+    def _logerr(self, msg):
+        if self.logger:
+            self.logger.error(msg)
+        else:
+            print(f"[ERROR] {msg}")
+    
     def solve(self, bbox, image_shape, keypoints=None):
-        """
-        解算位姿
-        
-        Args:
-            bbox: (x1, y1, x2, y2) 检测框
-            image_shape: (h, w) 图像尺寸
-            keypoints: [[x,y], ...] 可选的4个角点，若提供则优先使用角点而非 bbox 角点
-            
-        Returns:
-            dict: {
-                'success': bool,
-                'distance': float,  # 距离（米）
-                'yaw': float,       # 偏航角（度）
-                'pitch': float,     # 俯仰角（度）
-                'roll': float,      # 翻滚角（度）
-                'tvec': np.array,   # 平移向量
-                'rvec': np.array    # 旋转向量
-            }
-        """
-        # 如果提供了关键点，使用关键点解算
+        """解算位姿"""
         if keypoints is not None and len(keypoints) == 4:
             return self.solve_with_keypoints(keypoints, image_shape)
         
-        # 否则使用 bbox 角点
         start_time = time.time()
         
         x1, y1, x2, y2 = bbox
         
-        # 从 bbox 获取 2D 点（四角，顺序需与 object_points 一一对应）
         image_points = np.array([
-            [x1, y2],   # 左下
-            [x2, y2],   # 右下
-            [x2, y1],   # 右上
-            [x1, y1]    # 左上
+            [x1, y2],
+            [x2, y2],
+            [x2, y1],
+            [x1, y1]
         ], dtype=np.float64)
         
         try:
-            # PnP 解算
             success, rvec, tvec = cv2.solvePnP(
                 self.object_points,
                 image_points,
@@ -97,10 +86,7 @@ class PoseSolver:
             if not success:
                 return {'success': False}
             
-            # 计算距离
             distance = np.linalg.norm(tvec)
-            
-            # 转换为欧拉角
             R, _ = cv2.Rodrigues(rvec)
             yaw, pitch, roll = self._rotation_matrix_to_euler(R)
             
@@ -114,53 +100,27 @@ class PoseSolver:
                 'rvec': rvec.flatten()
             }
             
-            # 耗时统计
-            elapsed = (time.time() - start_time) * 1000  # ms
+            elapsed = (time.time() - start_time) * 1000
             self._total_time += elapsed
             self._count += 1
             avg_time = self._total_time / self._count if self._count > 0 else 0
             
-            # 调试日志（节流，避免刷屏）
-            rospy.loginfo_throttle(
-                1.0,
-                "[PnP] bbox=(%.1f, %.1f, %.1f, %.1f), "
-                "image_pts=%s, "
-                "distance=%.3f m, yaw=%.2f deg, pitch=%.2f deg, roll=%.2f deg, "
-                "tvec=%s, 耗时=%.1fms, 平均=%.1fms" % (
-                    x1, y1, x2, y2,
-                    np.array2string(image_points, precision=1, suppress_small=True),
-                    distance,
-                    np.degrees(yaw), np.degrees(pitch), np.degrees(roll),
-                    np.array2string(tvec.flatten(), precision=3, suppress_small=True),
-                    elapsed, avg_time
-                )
+            self._loginfo(
+                f"[PnP] bbox=({x1:.1f}, {y1:.1f}, {x2:.1f}, {y2:.1f}), "
+                f"distance={distance:.3f}m, yaw={np.degrees(yaw):.2f}deg, "
+                f"耗时={elapsed:.1f}ms, 平均={avg_time:.1f}ms"
             )
             
-            # 平滑滤波
-            smoothed_pose = self._smooth_pose(pose)
-            return smoothed_pose
+            return self._smooth_pose(pose)
             
         except Exception as e:
-            rospy.logerr(f"PnP 解算失败: {e}")
+            self._logerr(f"PnP 解算失败: {e}")
             return {'success': False}
     
     def solve_with_keypoints(self, keypoints, image_shape):
-        """
-        使用关键点解算位姿
-        
-        Args:
-            keypoints: [[x,y], [x,y], [x,y], [x,y]] 四个角点（顺时针）
-            image_shape: (h, w) 图像尺寸
-            
-        Returns:
-            dict: 同 solve() 返回值
-        """
+        """使用关键点解算位姿"""
         start_time = time.time()
         
-        # 关键点顺序需与 object_points 对应：
-        # object_points: 左下 -> 右下 -> 右上 -> 左上
-        # keypoints 期望: 左上 -> 右上 -> 右下 -> 左下（顺时针）
-        # 所以需要转换顺序
         image_points = np.array([
             [keypoints[3][0], keypoints[3][1]],  # 左下
             [keypoints[2][0], keypoints[2][1]],  # 右下
@@ -169,7 +129,6 @@ class PoseSolver:
         ], dtype=np.float64)
         
         try:
-            # PnP 解算
             success, rvec, tvec = cv2.solvePnP(
                 self.object_points,
                 image_points,
@@ -181,10 +140,7 @@ class PoseSolver:
             if not success:
                 return {'success': False}
             
-            # 计算距离
             distance = np.linalg.norm(tvec)
-            
-            # 转换为欧拉角
             R, _ = cv2.Rodrigues(rvec)
             yaw, pitch, roll = self._rotation_matrix_to_euler(R)
             
@@ -198,39 +154,21 @@ class PoseSolver:
                 'rvec': rvec.flatten()
             }
             
-            # 耗时统计
             elapsed = (time.time() - start_time) * 1000
-            self._total_time += elapsed
-            self._count += 1
-            avg_time = self._total_time / self._count if self._count > 0 else 0
             
-            # 调试日志
-            rospy.loginfo_throttle(
-                1.0,
-                "[PnP] keypoints=%s, "
-                "distance=%.3f m, yaw=%.2f deg, 耗时=%.1fms" % (
-                    keypoints,
-                    distance,
-                    np.degrees(yaw),
-                    elapsed
-                )
+            self._loginfo(
+                f"[PnP] keypoints, distance={distance:.3f}m, "
+                f"yaw={np.degrees(yaw):.2f}deg, 耗时={elapsed:.1f}ms"
             )
             
-            # 平滑滤波
-            smoothed_pose = self._smooth_pose(pose)
-            return smoothed_pose
+            return self._smooth_pose(pose)
             
         except Exception as e:
-            rospy.logerr(f"PnP 关键点解算失败: {e}")
+            self._logerr(f"PnP 关键点解算失败: {e}")
             return {'success': False}
     
     def _rotation_matrix_to_euler(self, R):
-        """
-        旋转矩阵转欧拉角 (ZYX 顺序)
-        
-        Returns:
-            (yaw, pitch, roll) 弧度
-        """
+        """旋转矩阵转欧拉角 (ZYX 顺序)"""
         sy = np.sqrt(R[0, 0] * R[0, 0] + R[1, 0] * R[1, 0])
         
         singular = sy < 1e-6
@@ -244,10 +182,10 @@ class PoseSolver:
             y = np.arctan2(-R[2, 0], sy)
             z = 0
         
-        return z, y, x  # yaw, pitch, roll
+        return z, y, x
     
     def _smooth_pose(self, pose):
-        """对位姿进行滑动平均滤波"""
+        """滑动平均滤波"""
         self.pose_history.append(pose)
         if len(self.pose_history) > self.history_size:
             self.pose_history.pop(0)
@@ -255,46 +193,27 @@ class PoseSolver:
         if len(self.pose_history) < 2:
             return pose
         
-        # 平滑后的位姿
         smoothed = {
             'success': True,
             'distance': np.mean([p['distance'] for p in self.pose_history]),
             'yaw': np.mean([p['yaw'] for p in self.pose_history]),
             'pitch': np.mean([p['pitch'] for p in self.pose_history]),
             'roll': np.mean([p['roll'] for p in self.pose_history]),
-            'tvec': pose['tvec'],  # 使用最新值
+            'tvec': pose['tvec'],
             'rvec': pose['rvec']
         }
         
         return smoothed
     
     def get_target_bbox_ratio(self, bbox, image_shape):
-        """
-        计算目标在画面中的占比
-        
-        Args:
-            bbox: (x1, y1, x2, y2)
-            image_shape: (h, w)
-            
-        Returns:
-            float: 宽度占比 (0-1)
-        """
+        """计算目标在画面中的占比"""
         x1, y1, x2, y2 = bbox
         bbox_width = x2 - x1
         image_width = image_shape[1]
         return bbox_width / image_width
     
     def get_center_offset(self, bbox, image_shape):
-        """
-        计算目标中心与画面中心的偏差
-        
-        Args:
-            bbox: (x1, y1, x2, y2)
-            image_shape: (h, w)
-            
-        Returns:
-            (offset_x, offset_y): 归一化偏差 (-1 到 1)
-        """
+        """计算目标中心与画面中心的偏差"""
         x1, y1, x2, y2 = bbox
         cx = (x1 + x2) / 2
         cy = (y1 + y2) / 2
@@ -302,7 +221,7 @@ class PoseSolver:
         image_cx = image_shape[1] / 2
         image_cy = image_shape[0] / 2
         
-        offset_x = (cx - image_cx) / image_shape[1] * 2  # -1 到 1
+        offset_x = (cx - image_cx) / image_shape[1] * 2
         offset_y = (cy - image_cy) / image_shape[0] * 2
         
         return offset_x, offset_y

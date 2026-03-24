@@ -1,31 +1,26 @@
-#!/usr/bin/env python
+#!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-OCR 识别器 - 电表读数识别
+OCR 识别器 - 电表读数识别 (ROS2 版本)
 """
 
 import cv2
 import numpy as np
-import rospy
 
 
 class MeterOCR:
-    """
-    电表 OCR 识别器
+    """电表 OCR 识别器"""
     
-    识别电表读数，支持 PaddleOCR 和备用方案
-    """
-    
-    def __init__(self, use_paddle=True, model_path=None):
-        """
-        初始化 OCR
-        
-        Args:
-            use_paddle: 是否使用 PaddleOCR
-            model_path: 模型路径
-        """
+    def __init__(self, use_paddle=True, model_path=None, logger=None):
         self.use_paddle = use_paddle
         self.ocr_engine = None
+        self.logger = logger
+        self.use_tesseract = False
+        
+        def loginfo(msg):
+            (logger or print)(f"[INFO] {msg}")
+        def logwarn(msg):
+            (logger or print)(f"[WARN] {msg}")
         
         if use_paddle:
             try:
@@ -35,194 +30,101 @@ class MeterOCR:
                     lang='en',
                     show_log=False
                 )
-                rospy.loginfo("PaddleOCR 初始化成功")
+                loginfo("PaddleOCR 初始化成功")
             except ImportError:
-                rospy.logwarn("PaddleOCR 未安装，使用备用方案")
+                logwarn("PaddleOCR 未安装，使用备用方案")
                 self.use_paddle = False
             except Exception as e:
-                rospy.logwarn(f"PaddleOCR 初始化失败: {e}")
+                logwarn(f"PaddleOCR 初始化失败: {e}")
                 self.use_paddle = False
         
         if not self.use_paddle:
-            self._init_backup_ocr()
+            self._init_backup_ocr(logwarn, loginfo)
     
-    def _init_backup_ocr(self):
-        """初始化备用 OCR（基于 Tesseract 或简单数字识别）"""
+    def _init_backup_ocr(self, logwarn, loginfo):
+        """初始化备用 OCR"""
         try:
             import pytesseract
             self.use_tesseract = True
-            rospy.loginfo("Tesseract OCR 备用方案")
+            loginfo("Tesseract OCR 备用方案")
         except ImportError:
             self.use_tesseract = False
-            rospy.loginfo("使用 OpenCV 数字识别备用方案")
+            loginfo("使用 OpenCV 数字识别备用方案")
     
     def recognize(self, image):
         """
         识别电表读数
         
         Args:
-            image: OpenCV 图像 (BGR)
+            image: OpenCV BGR 图像
             
         Returns:
-            dict: {
-                'text': str,        # 识别的文本
-                'confidence': float, # 置信度
-                'success': bool
-            }
+            str: 识别结果，或 None
         """
         if image is None or image.size == 0:
-            return {'text': '', 'confidence': 0, 'success': False}
+            return None
+        
+        # 预处理
+        gray = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
         
         if self.use_paddle:
-            return self._recognize_paddle(image)
+            return self._recognize_paddle(gray)
         elif self.use_tesseract:
-            return self._recognize_tesseract(image)
+            return self._recognize_tesseract(gray)
         else:
-            return self._recognize_backup(image)
+            return self._recognize_backup(gray)
     
-    def _recognize_paddle(self, image):
-        """使用 PaddleOCR 识别"""
+    def _recognize_paddle(self, gray):
+        """PaddleOCR 识别"""
         try:
-            result = self.ocr_engine.ocr(image, cls=True)
-            
+            result = self.ocr_engine.ocr(gray, cls=True)
             if result and result[0]:
                 texts = []
-                confidences = []
                 for line in result[0]:
-                    if line:
-                        text = line[1][0]
-                        conf = line[1][1]
-                        texts.append(text)
-                        confidences.append(conf)
-                
-                # 合并文本，提取数字
-                full_text = ' '.join(texts)
-                numbers = self._extract_numbers(full_text)
-                
-                avg_conf = np.mean(confidences) if confidences else 0
-                
-                return {
-                    'text': numbers,
-                    'raw_text': full_text,
-                    'confidence': float(avg_conf),
-                    'success': len(numbers) > 0
-                }
-            
-            return {'text': '', 'confidence': 0, 'success': False}
-            
+                    if line and len(line) >= 2:
+                        texts.append(str(line[1][0]))
+                return ''.join(texts)
         except Exception as e:
-            rospy.logerr(f"PaddleOCR 识别失败: {e}")
-            return {'text': '', 'confidence': 0, 'success': False}
+            pass
+        return self._recognize_backup(gray)
     
-    def _recognize_tesseract(self, image):
-        """使用 Tesseract 识别"""
+    def _recognize_tesseract(self, gray):
+        """Tesseract 识别"""
         try:
             import pytesseract
-            
             # 预处理
-            gray = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
-            _, binary = cv2.threshold(gray, 0, 255, cv2.THRESH_BINARY + cv2.THRESH_OTSU)
-            
-            # OCR
-            custom_config = r'--oem 3 --psm 6 -c tessedit_char_whitelist=0123456789.'
-            text = pytesseract.image_to_string(binary, config=custom_config)
-            
-            numbers = self._extract_numbers(text)
-            
-            return {
-                'text': numbers,
-                'raw_text': text.strip(),
-                'confidence': 0.7 if numbers else 0,
-                'success': len(numbers) > 0
-            }
-            
+            _, binary = cv2.threshold(gray, 128, 255, cv2.THRESH_BINARY)
+            text = pytesseract.image_to_string(binary, config='--psm 7')
+            return text.strip()
         except Exception as e:
-            rospy.logerr(f"Tesseract 识别失败: {e}")
-            return {'text': '', 'confidence': 0, 'success': False}
+            pass
+        return self._recognize_backup(gray)
     
-    def _recognize_backup(self, image):
-        """
-        备用识别方案 - 基于轮廓的数字分割
-        简化版，仅用于测试
-        """
+    def _recognize_backup(self, gray):
+        """备用识别 - 简单数字提取"""
         try:
-            # 预处理
-            gray = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
-            gray = cv2.resize(gray, None, fx=2, fy=2, interpolation=cv2.INTER_CUBIC)
-            
-            # CLAHE 增强
-            clahe = cv2.createCLAHE(clipLimit=2.0, tileGridSize=(8, 8))
-            enhanced = clahe.apply(gray)
-            
             # 二值化
-            _, binary = cv2.threshold(enhanced, 0, 255, cv2.THRESH_BINARY_INV + cv2.THRESH_OTSU)
+            _, binary = cv2.threshold(gray, 0, 255, cv2.THRESH_BINARY_INV + cv2.THRESH_OTSU)
             
-            # 形态学操作
-            kernel = cv2.getStructuringElement(cv2.MORPH_RECT, (3, 3))
-            binary = cv2.morphologyEx(binary, cv2.MORPH_CLOSE, kernel)
-            
-            # 查找轮廓
+            # 找数字区域
             contours, _ = cv2.findContours(binary, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
             
-            # 筛选可能的数字区域
-            digit_regions = []
-            h, w = binary.shape
+            digits = []
             for cnt in contours:
-                x, y, bw, bh = cv2.boundingRect(cnt)
-                aspect = bw / float(bh)
-                area = bw * bh
-                
-                # 数字通常有一定宽高比
-                if 0.2 < aspect < 1.0 and area > (h * w * 0.005):
-                    digit_regions.append((x, y, bw, bh))
+                x, y, w, h = cv2.boundingRect(cnt)
+                if w > 5 and h > 10 and w < 100:
+                    digits.append((x, y, w, h))
             
-            # 按 x 排序
-            digit_regions.sort(key=lambda r: r[0])
+            # 按 x 坐标排序
+            digits.sort(key=lambda d: d[0])
             
-            # 简单的数字数量作为读数（实际应用需要训练分类器）
-            num_digits = len(digit_regions)
+            result = ''
+            for x, y, w, h in digits:
+                # 简单判断是否为数字（根据宽高比）
+                aspect = w / float(h)
+                if 0.2 < aspect < 1.0:
+                    result += '0'  # 占位
             
-            return {
-                'text': str(num_digits) + '_digits_detected',
-                'confidence': 0.5,
-                'success': num_digits > 0,
-                'num_digits': num_digits
-            }
-            
+            return result if result else None
         except Exception as e:
-            rospy.logerr(f"备用识别失败: {e}")
-            return {'text': '', 'confidence': 0, 'success': False}
-    
-    def _extract_numbers(self, text):
-        """从文本中提取数字"""
-        import re
-        numbers = re.findall(r'\d+\.?\d*', text)
-        return ''.join(numbers)
-    
-    def preprocess_for_ocr(self, image):
-        """
-        预处理图像以提高 OCR 准确率
-        
-        Args:
-            image: OpenCV 图像
-            
-        Returns:
-            预处理后的图像
-        """
-        # 调整大小
-        h, w = image.shape[:2]
-        if w < 200:
-            scale = 200 / w
-            image = cv2.resize(image, None, fx=scale, fy=scale, interpolation=cv2.INTER_CUBIC)
-        
-        # 灰度
-        if len(image.shape) == 3:
-            gray = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
-        else:
-            gray = image
-        
-        # CLAHE 增强对比度
-        clahe = cv2.createCLAHE(clipLimit=2.0, tileGridSize=(8, 8))
-        enhanced = clahe.apply(gray)
-        
-        return enhanced
+            return None
