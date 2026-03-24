@@ -393,7 +393,7 @@ if __name__ == '__main__':
     import argparse
     parser = argparse.ArgumentParser()
     parser.add_argument('--image', type=str, default='/home/stephen/.openclaw/workspace/PoseAdapter/tests/meter_test.jpg')
-    parser.add_argument('--video', type=str, default='/home/stephen/.openclaw/workspace/PoseAdapter/tests/meter_video.mp4')
+    parser.add_argument('--video', type=str, default='')
     parser.add_argument('--method', type=str, default='contour', choices=['bbox', 'contour'])
     parser.add_argument('--max-frames', type=int, default=50)
     args = parser.parse_args()
@@ -401,7 +401,13 @@ if __name__ == '__main__':
     # 测试图片
     if os.path.exists(args.image):
         test_image(args.image, args.method)
+    else:
+        print(f"图片不存在: {args.image}")
     
-    # 测试视频
-    if os.path.exists(args.video):
+    # 测试视频 (可选)
+    if args.video and os.path.exists(args.video):
         test_video(args.video, args.method, args.max_frames)
+    else:
+        if args.video:
+            print(f"视频不存在: {args.video}")
+        print("跳过视频测试")
