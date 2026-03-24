@@ -182,7 +182,7 @@ class MotionController(Node):
             
             self.zsi_client = mc_sdk_zsl_1_py.HighLevel()
             
-            local_ip = os.environ.get('ZSI_LOCAL_IP', '192.168.234.15')
+            local_ip = os.environ.get('ZSI_LOCAL_IP', '192.168.234.234')
             local_port = int(os.environ.get('ZSI_LOCAL_PORT', 43988))
             dog_ip = os.environ.get('ZSI_DOG_IP', '192.168.234.1')
             
