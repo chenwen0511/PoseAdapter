@@ -18,9 +18,18 @@ class MeterOCR:
         self.use_tesseract = False
         
         def loginfo(msg):
-            (logger or print)(f"[INFO] {msg}")
+            if logger is not None and hasattr(logger, "info"):
+                logger.info(msg)
+            else:
+                print(f"[INFO] {msg}")
+
         def logwarn(msg):
-            (logger or print)(f"[WARN] {msg}")
+            if logger is not None and hasattr(logger, "warning"):
+                logger.warning(msg)
+            elif logger is not None and hasattr(logger, "warn"):
+                logger.warn(msg)
+            else:
+                print(f"[WARN] {msg}")
         
         if use_paddle:
             try:
