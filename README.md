@@ -140,10 +140,20 @@ BODY=GO2 roslaunch pose_adapter pose_adapter.launch
 | 变量 | 默认值 | 说明 |
 |------|--------|------|
 | `BODY` | `ZSI-1` | 机器狗类型 |
-| `ZSI_SDK_ROOT` | `/home/stephen/.openclaw/workspace/zsibot_sdk` | SDK 路径 |
-| `ZSI_LOCAL_IP` | `192.168.1.100` | 本地 IP |
+| `ZSI_SDK_ROOT` | `../zsibot_sdk` | SDK 路径（与 PoseAdapter 同层目录下的 `zsibot_sdk`） |
+| `ZSI_LOCAL_IP` | `192.168.234.15` | 本地 IP |
 | `ZSI_LOCAL_PORT` | `43988` | 本地端口 |
 | `ZSI_DOG_IP` | `192.168.234.1` | 机器狗 IP |
+
+若默认路径下不存在 `zsibot_sdk` 目录，请先在与 PoseAdapter **同级**目录克隆 SDK：
+
+```bash
+# 在 PoseAdapter 仓库的上一级目录执行（与 PoseAdapter 并列）
+cd /path/to/workspace
+git clone git@github.com:zsibot/zsibot_sdk.git
+```
+
+克隆后目录结构应为：`PoseAdapter/` 与 `zsibot_sdk/` 并列。使用 `./start.sh` 时若仍为 `BODY=ZSI-1` 且该目录不存在，脚本会报错并打印上述 `git clone` 提示。
 
 ### ZSI-1 控制接口
 

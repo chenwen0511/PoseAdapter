@@ -176,8 +176,10 @@ class MotionController:
             
             # 设置库路径
             arch = platform.machine().replace('amd64', 'x86_64').replace('arm64', 'aarch64')
-            sdk_path = os.path.join(os.environ.get('ZSI_SDK_ROOT', '/home/stephen/.openclaw/workspace/zsibot_sdk'), 
-                                    f'lib/zsl-1/{arch}')
+            _default_zsi_root = os.path.abspath(
+                os.path.join(os.path.dirname(__file__), '..', '..', '..', '..', '..', 'zsibot_sdk')
+            )
+            sdk_path = os.path.join(os.environ.get('ZSI_SDK_ROOT', _default_zsi_root), f'lib/zsl-1/{arch}')
             
             if sdk_path not in sys.path:
                 sys.path.insert(0, sdk_path)
@@ -188,7 +190,7 @@ class MotionController:
             self.zsi_client = mc_sdk_zsl_1_py.HighLevel()
             
             # 初始化连接
-            local_ip = os.environ.get('ZSI_LOCAL_IP', '192.168.1.100')
+            local_ip = os.environ.get('ZSI_LOCAL_IP', '192.168.234.15')
             local_port = int(os.environ.get('ZSI_LOCAL_PORT', 43988))
             dog_ip = os.environ.get('ZSI_DOG_IP', '192.168.234.1')
             
