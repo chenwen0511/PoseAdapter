@@ -305,6 +305,9 @@ class PoseAdapterNode(Node):
         
         try:
             self.rtmp_process.stdin.write(cv_image.tobytes())
+            # 每 30 帧打印一次日志确认推流正常
+            if self._frame_count % 30 == 0:
+                self.get_logger().info(f"[RTMP] 推流中... frame={self._frame_count}")
         except Exception as e:
             self.get_logger().warn(f"RTMP 推流失败: {e}")
     
@@ -664,6 +667,8 @@ class PoseAdapterNode(Node):
         
         # 无目标时停止
         if len(self.current_tracks) == 0:
+            if self.rtmp_process is not None:
+                self._log_throttle("info", "rtmp_no_target", 5.0, "[RTMP] 无目标，继续推流中...")
             self._log_throttle("warn", "no_target_idle", 2.0, "[Pipeline] 无目标，不下发任何控制指令")
             return
         
