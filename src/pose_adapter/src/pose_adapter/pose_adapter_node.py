@@ -774,6 +774,19 @@ class PoseAdapterNode(Node):
 
     def _add_debug_overlay(self, debug_image):
         """发布调试图像（带完整可视化）"""
+        # 添加日志：记录当前有哪些数据可用于绘制
+        det_count = len(self.current_detections) if self.current_detections else 0
+        track_count = len(self.current_tracks) if self.current_tracks else 0
+        has_edge = self.current_edge_image is not None
+        has_keypts = self.current_keypoints is not None and len(self.current_keypoints) == 4
+        has_pose = self.current_pose is not None and self.current_pose.get('success')
+        has_cmd = self.current_control_cmd is not None
+        
+        self.get_logger().info(
+            f"[Overlay] draws: detections={det_count}, tracks={track_count}, "
+            f"edge={has_edge}, keypoints={has_keypts}, pose={has_pose}, cmd={has_cmd}"
+        )
+        
         debug_image = debug_image.copy()
         
         # ========== 1. 边缘检测可视化 ==========
