@@ -262,18 +262,22 @@ class PoseAdapterNode(Node):
     
     def _init_rtmp_stream(self):
         """初始化 RTMP 推流"""
+        self.get_logger().info(f"[RTMP] 初始化检查... rtmp_url='{self.rtmp_url}'")
+        
         # RTMP 推流初始化（独立于 publish_debug_image）
         rtmp_url = self.rtmp_url
         if not rtmp_url:
             self.get_logger().info("未设置 rtmp_url，跳过推流初始化")
             return
         
+        self.get_logger().info(f"[RTMP] rtmp_url 已配置，准备启动推流...")
+        
         try:
             # 检查 ffmpeg 是否可用
             import subprocess
             result = subprocess.run(['which', 'ffmpeg'], capture_output=True)
             if result.returncode != 0:
-                self.get_logger().warn("ffmpeg 未安装，无法推流")
+                self.get_logger().warn("[RTMP] ffmpeg 未安装，无法推流")
                 return
             
             # 使用 ffmpeg 推流
