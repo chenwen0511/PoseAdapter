@@ -50,7 +50,8 @@ display:
   # 本地 RTSP 推流（推荐）
   # 1. 先启动本地 mediamtx: ./scripts/start_mediamtx.sh start
   # 2. 设置下面的 RTMP 地址指向本地
-  rtmp_url: "rtmp://127.0.0.1:8554/pose"  # 本地 RTMP 推流地址
+  # mediamtx 默认 RTMP 监听端口通常是 1935（而 RTSP 是 8554）
+  rtmp_url: "rtmp://127.0.0.1:1935/pose"  # 本地 RTMP 推流地址
   # 拉流地址: rtsp://127.0.0.1:8554/pose
   # 
   # 远程推流（如果有外网服务器）

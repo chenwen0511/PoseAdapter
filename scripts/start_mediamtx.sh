@@ -63,7 +63,8 @@ webrtcAddress: :8888
 srtAddress: :8890
 
 # RTMP 配置
-rtmpAddress: :8554
+# mediamtx 默认 RTMP 通常监听在 1935（而 RTSP 是 8554）
+rtmpAddress: :1935
 
 # 日志
 logLevel: info
@@ -75,7 +76,7 @@ EOF
     cd "$MEDIAMTX_DIR"
     ./mediamtx "$MEDIAMTX_YAML" &
     echo "mediamtx 已启动"
-    echo "RTMP 推流地址: rtmp://127.0.0.1:8554/pose"
+    echo "RTMP 推流地址: rtmp://127.0.0.1:1935/pose"
     echo "RTSP 拉流地址: rtsp://127.0.0.1:8554/pose"
     echo "WebRTC 地址: webrtc://127.0.0.1:8888/pose"
 }
