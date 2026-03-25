@@ -45,6 +45,6 @@ tracking:
   min_hits: 3
   iou_threshold: 0.3
 
-# 调试可视化参数（顶层）
-publish_debug_image: true      # 是否发布调试图像到 /pose_adapter/debug_image
-rtmp_url: ""                  # RTMP 推流地址，留空则不推流
+display:
+  publish_debug_image: false     # 是否发布调试图像到 /pose_adapter/debug_image
+  rtmp_url: "rtmp://robotsolution.cn:1935/dksl/stream/ROBOT_DOG_001_99-0-0_adapter-0?sign=xxxx"  # RTMP 推流地址，留空则不推流
