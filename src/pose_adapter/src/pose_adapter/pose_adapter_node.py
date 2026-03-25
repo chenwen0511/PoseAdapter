@@ -1044,6 +1044,7 @@ class PoseAdapterNode(Node):
             if len(self.current_detections) > 0:
                 self._add_debug_overlay(debug_image)
                 # 推流带 overlay 的帧
+                self.get_logger().info(f"[RTMP] 推送 overlay 帧，frame={self._frame_count}")
                 self._push_rtmp_frame(debug_image)
         else:
             self._log_throttle("info", "no_target_idle", 2.0, "[Pipeline] 无目标，不下发任何控制指令")
