@@ -933,9 +933,6 @@ class PoseAdapterNode(Node):
         # 图像可视化/推流：RTMP 每个循环都推，保证无检测时也能维持流畅性
         self._frame_count += 1
         debug_image = cv_image.copy()
-        # 有检测结果时才叠加 YOLO/角点/距离/控制语义；无检测结果则只推原图背景。
-        if len(self.current_detections) > 0:
-            self._add_debug_overlay(debug_image)
         
         # ROS topic 发布（可选节流）
         if self.publish_debug_image and self._frame_count % self._debug_image_interval == 0:
@@ -950,7 +947,7 @@ class PoseAdapterNode(Node):
         # RTMP 推流（不节流，维持直播不断帧）
         self._push_rtmp_frame(debug_image)
         
-        # 4. PnP位姿解算 + 5. 控制
+        # 4. PnP位姿解算 + 5. 控制 + 绘制 overlay
         if self.target_track_id is not None:
             target_track = None
             for track_id, bbox, conf in self.current_tracks:
@@ -1029,6 +1026,12 @@ class PoseAdapterNode(Node):
             # OCR
             if self.controller.is_ready_for_ocr():
                 self._trigger_ocr(bbox)
+            
+            # 绘制 overlay（在 PnP 和控制计算完成后）
+            if len(self.current_detections) > 0:
+                self._add_debug_overlay(debug_image)
+                # 推流带 overlay 的帧
+                self._push_rtmp_frame(debug_image)
         else:
             self._log_throttle("info", "no_target_idle", 2.0, "[Pipeline] 无目标，不下发任何控制指令")
         
