@@ -35,22 +35,22 @@ from pose_adapter.camera import CameraHandler
 class PoseAdapterNode(Node):
     """
     Pose Adapter 主节点 (ROS2)
-    
+
     整合检测、追踪、位姿解算、控制、OCR 的完整流程
     """
-    
+
     def __init__(self):
         """初始化节点"""
         super().__init__('pose_adapter')
-        
+
         self.get_logger().info(f"节点运行 Python: {sys.executable}")
-        
+
         # OpenCV 视频捕获
         self.cap = None
         self.frame_queue = queue.Queue(maxsize=1)  # 保持最新一帧
         self.vision_thread = None
         self.vision_running = False
-        
+
         # 参数
         self._load_params()
 
@@ -59,7 +59,7 @@ class PoseAdapterNode(Node):
         self.dist_coeffs = None
         self.image_shape = None
         self._load_calib_from_file()
-        
+
         # 模块
         self.detector = None
         self.tracker = None
@@ -79,24 +79,24 @@ class PoseAdapterNode(Node):
         self.ocr_result = None
         self._frame_count = 0
         self._throttle_ts = {}
-        
+
         # 防死循环
         self._consecutive_timeouts = 0
         self._max_consecutive_timeouts = 3
         self._pause_duration = 2.0
-        
+
         # 新增：调试可视化状态
         self.current_edge_image = None  # 边缘检测结果
         self.current_keypoints = None   # 4个角点坐标
         self.current_pose = None        # PnP解算结果 (distance, yaw)
         self.current_control_cmd = None # 控制命令描述
-        
+
         # RTMP 推流（稍后初始化）
         self.rtmp_writer = None
         # `_init_rtmp_stream()` 在 rtmp_url 为空时会提前 return，
         # 这里先初始化，避免后续 pipeline 访问 `self.rtmp_process` 引发 AttributeError。
         self.rtmp_process = None
-        
+
         # 使用 Go2 相机 SDK
         if self.use_go2_camera:
             self._init_camera()
@@ -105,23 +105,23 @@ class PoseAdapterNode(Node):
 
         # ROS2
         self._init_ros()
-        
+
         # 定时器替代 ROS1 的 timer
         self._image_timer = None
         self._control_timer = None
-        
+
         self.get_logger().info("Pose Adapter 节点初始化完成")
-    
+
     def _load_params(self):
         """加载参数"""
         # 相机参数
         self.declare_parameter('camera_width', 1280)
         self.declare_parameter('camera_height', 720)
-        
+
         # 电表尺寸
         self.declare_parameter('meter_width', 0.2)
         self.declare_parameter('meter_height', 0.3)
-        
+
         # 控制参数
         self.declare_parameter('target_distance', 1.7)
         self.declare_parameter('distance_tolerance', 0.05)
@@ -129,7 +129,7 @@ class PoseAdapterNode(Node):
         self.declare_parameter('angle_tolerance', 2.0)
         self.declare_parameter('center_tolerance', 0.05)
         self.declare_parameter('loop_hz', 5)
-        
+
         # 模型
         self.declare_parameter('yolo_model_path', '')
         self.declare_parameter('use_paddle_ocr', False)
@@ -138,17 +138,17 @@ class PoseAdapterNode(Node):
         self.declare_parameter('min_bbox_area_ratio', 0.05)
         self.declare_parameter('keypoint_method', 'bbox')
         self.declare_parameter('use_gpu', True)
-        
+
         # 标定
         self.declare_parameter('calib_file', '')
-        
+
         # 网络
         self.declare_parameter('network_interface', '')
         self.declare_parameter('use_go2_camera', False)
-        
+
         # 机器狗
         self.declare_parameter('body_type', os.environ.get('BODY', ''))
-        
+
         # SDK 控制
         self.declare_parameter('use_high_level_sdk', True)
         self.declare_parameter('disable_obstacle_avoidance_on_start', True)
@@ -164,13 +164,13 @@ class PoseAdapterNode(Node):
         self.declare_parameter('tracking_max_age', 30)
         self.declare_parameter('tracking_min_hits', 3)
         self.declare_parameter('tracking_iou_threshold', 0.3)
-        
+
         # 图像话题
         self.declare_parameter('camera_image_topic', '/camera/image_raw')
-        
+
         # 保存路径
         self.declare_parameter('image_save_path', '/tmp/pose_adapter_images')
-        
+
         # RTSP 流
         self.declare_parameter('rtsp_url', 'rtsp://192.168.234.1:8554/test')
 
@@ -223,14 +223,14 @@ class PoseAdapterNode(Node):
         self.tracking_max_age = self.get_parameter('tracking_max_age').value
         self.tracking_min_hits = self.get_parameter('tracking_min_hits').value
         self.tracking_iou_threshold = self.get_parameter('tracking_iou_threshold').value
-        
+
         # 调试可视化参数
         self.declare_parameter('publish_debug_image', True)
         self.declare_parameter('rtmp_url', '')
-        
+
         self.publish_debug_image = self.get_parameter('publish_debug_image').value
         self.rtmp_url = self.get_parameter('rtmp_url').value
-        
+
         # 初始化 RTMP 推流
         self._apply_config_yaml_overrides()
         self._init_rtmp_stream()
@@ -242,7 +242,7 @@ class PoseAdapterNode(Node):
 
     def _apply_config_yaml_overrides(self):
         """
-        从仓库根目录的 `config/params.yaml` 读取“业务配置”，覆盖当前 ROS2 参数值。
+        从仓库根目录的 `config/params.yaml` 读取"业务配置"，覆盖当前 ROS2 参数值。
 
         这样你可以继续使用：
           camera.width / meter.width / control.* / unitree_sdk.* / detection.*
@@ -335,7 +335,7 @@ class PoseAdapterNode(Node):
             if 'rtmp_url' in cfg:
                 self.rtmp_url = cfg.get('rtmp_url', self.rtmp_url)
 
-        # 只打印“是否设置”，避免在日志里泄露签名类参数
+        # 只打印"是否设置"，避免在日志里泄露签名类参数
         self.get_logger().info(
             f"[Config] 覆盖参数生效(来自{cfg_path})：publish_debug_image={self.publish_debug_image}, "
             f"rtmp_url_set={bool(self.rtmp_url)}"
@@ -348,17 +348,17 @@ class PoseAdapterNode(Node):
             self.get_logger().error(f"无法打开 RTSP 流: {self.rtsp_url}")
             self.cap = None
             return
-        
+
         # 设置低延迟
         self.cap.set(cv2.CAP_PROP_BUFFERSIZE, 1)
         self.get_logger().info(f"RTSP 流已打开: {self.rtsp_url}")
-        
+
         # 启动生产者线程
         self.vision_running = True
         self.vision_thread = threading.Thread(target=self._vision_loop, daemon=True)
         self.vision_thread.start()
         self.get_logger().info("视觉生产者线程已启动")
-    
+
     def _vision_loop(self):
         """生产者线程：持续从 RTSP 拉流"""
         while self.vision_running:
@@ -369,7 +369,7 @@ class PoseAdapterNode(Node):
                     self.cap.set(cv2.CAP_PROP_BUFFERSIZE, 1)
                 time.sleep(1)
                 continue
-            
+
             ret, frame = self.cap.read()
             if ret and frame is not None:
                 # 入队，丢弃旧帧
@@ -384,7 +384,7 @@ class PoseAdapterNode(Node):
                 self.cap = cv2.VideoCapture(self.rtsp_url)
                 self.cap.set(cv2.CAP_PROP_BUFFERSIZE, 1)
                 time.sleep(0.5)
-    
+
     def _init_rtmp_stream(self):
         """初始化 RTMP 推流"""
         self.get_logger().info(f"[RTMP] 初始化检查... rtmp_url='{self.rtmp_url}'")
@@ -396,15 +396,15 @@ class PoseAdapterNode(Node):
                     return
             except Exception:
                 pass
-        
+
         # RTMP 推流初始化（独立于 publish_debug_image）
         rtmp_url = self.rtmp_url
         if not rtmp_url:
             self.get_logger().info("未设置 rtmp_url，跳过推流初始化")
             return
-        
+
         self.get_logger().info(f"[RTMP] rtmp_url 已配置，准备启动推流...")
-        
+
         try:
             # 检查 ffmpeg 是否可用
             import subprocess
@@ -412,7 +412,7 @@ class PoseAdapterNode(Node):
             if result.returncode != 0:
                 self.get_logger().warn("[RTMP] ffmpeg 未安装，无法推流")
                 return
-            
+
             # 使用 ffmpeg 推流
             cmd = [
                 'ffmpeg',
@@ -428,7 +428,7 @@ class PoseAdapterNode(Node):
                 '-pix_fmt', 'yuv420p',
                 '-profile:v', 'baseline',
                 '-level', '3.1',
-                # 关键帧越频繁，播放器越容易快速“对齐”解码（减少雪花/黑屏）。
+                # 关键帧越频繁，播放器越容易快速"对齐"解码（减少雪花/黑屏）。
                 '-g', '10',
                 '-keyint_min', '10',
                 '-sc_threshold', '0',
@@ -446,7 +446,7 @@ class PoseAdapterNode(Node):
             os.makedirs(log_dir, exist_ok=True)
             rtmp_ffmpeg_log_path = os.path.join(log_dir, 'pose_adapter_rtmp_ffmpeg.log')
             self._rtmp_ffmpeg_log_fp = open(rtmp_ffmpeg_log_path, 'a', buffering=1)
-            
+
             self.rtmp_process = subprocess.Popen(
                 cmd,
                 stdin=subprocess.PIPE,
@@ -456,7 +456,7 @@ class PoseAdapterNode(Node):
         except Exception as e:
             self.get_logger().warn(f"RTMP 推流初始化失败: {e}")
             self.rtmp_process = None
-    
+
     def _push_rtmp_frame(self, cv_image):
         """推送帧到 RTMP"""
         if self.rtmp_process is None or self.rtmp_process.stdin is None:
@@ -480,9 +480,9 @@ class PoseAdapterNode(Node):
                     f"[RTMP] 跳过推流：rtmp_process={self.rtmp_process is not None}, stdin={getattr(self.rtmp_process,'stdin',None) is not None}, frame={getattr(self,'_frame_count',None)}"
                 )
                 return
-        
+
         try:
-            # rawvideo(bgr24) 需要严格的帧字节数，否则会导致“雪花/马赛克/Packet corrupt”
+            # rawvideo(bgr24) 需要严格的帧字节数，否则会导致"雪花/马赛克/Packet corrupt"
             expected_size = int(self.camera_width) * int(self.camera_height) * 3
             img = cv_image
             if img.ndim == 2:
@@ -504,6 +504,12 @@ class PoseAdapterNode(Node):
                 img = img.astype(np.uint8, copy=False)
 
             data = img.tobytes()
+            # 详细日志
+            self.get_logger().debug(
+                f"[RTMP] 推流帧: shape={img.shape}, dtype={img.dtype}, "
+                f"len(data)={len(data)}, expected={expected_size}, frame={getattr(self,'_frame_count',None)}"
+            )
+            
             if len(data) != expected_size:
                 self._log_throttle(
                     "warn",
@@ -511,9 +517,10 @@ class PoseAdapterNode(Node):
                     2.0,
                     f"[RTMP] 帧大小不匹配，len(data)={len(data)} expected={expected_size} frame={getattr(self,'_frame_count',None)}"
                 )
+                # 大小不匹配时跳过
                 return
 
-            # 关键：保证写入不发生“部分写入”。使用 os.write 循环直到写完整帧。
+            # 关键：保证写入不发生"部分写入"。使用 os.write 循环直到写完整帧。
             import os
             fd = self.rtmp_process.stdin.fileno()
             buf = memoryview(data)
@@ -532,7 +539,7 @@ class PoseAdapterNode(Node):
             )
         except Exception as e:
             self.get_logger().warn(f"RTMP 推流失败: {e}")
-    
+
     def _load_calib_from_file(self):
         """从标定文件加载相机内参"""
         if not self.calib_file:
@@ -579,7 +586,7 @@ class PoseAdapterNode(Node):
         self.camera_handler = CameraHandler(config)
         if not self.camera_handler.is_available():
             self.get_logger().warn("Go2 相机不可用")
-    
+
     def _init_ros(self):
         """初始化 ROS2 发布/订阅"""
         # QoS 配置
@@ -588,7 +595,7 @@ class PoseAdapterNode(Node):
             history=HistoryPolicy.KEEP_LAST,
             depth=10
         )
-        
+
         # 发布
         self.cmd_vel_pub = self.create_publisher(Twist, '/cmd_vel', qos)
         self.debug_image_pub = self.create_publisher(Image, '/pose_adapter/debug_image', qos)
@@ -598,7 +605,7 @@ class PoseAdapterNode(Node):
         self.get_logger().info(f"图像来源: RTSP ({self.rtsp_url})")
 
         self.get_logger().info("使用同步顺序执行：取图 → 检测 → 追踪 → PnP → 控制(等待完成) → 循环")
-        
+
         # 初始化 RTSP 视频流
         self._init_rtsp_stream()
 
@@ -617,7 +624,7 @@ class PoseAdapterNode(Node):
             ], dtype=np.float64)
             self.dist_coeffs = np.array([0.1, -0.2, 0, 0, 0.05], dtype=np.float64)
             self.image_shape = (self.camera_height, self.camera_width)
-        
+
         self.detector = MeterDetector(
             model_path=self.yolo_model_path if self.yolo_model_path else None,
             conf_threshold=self.conf_threshold,
@@ -627,7 +634,7 @@ class PoseAdapterNode(Node):
             keypoint_method=self.keypoint_method,
             logger=self.get_logger(),
         )
-        
+
         self.get_logger().info(f"检测器 GPU: {self.use_gpu}, 关键点方式: {self.keypoint_method}")
         self.tracker = DeepSORTTracker(
             max_age=self.tracking_max_age,
@@ -640,12 +647,12 @@ class PoseAdapterNode(Node):
             (self.meter_width, self.meter_height),
             logger=self.get_logger(),
         )
-        
+
         # 确定网络接口
         interface = self.network_interface if self.network_interface else "eth1"
         if not interface:
             interface = "eth0"
-        
+
         self.controller = MotionController(
             target_distance=self.target_distance,
             target_ratio=self.target_ratio,
@@ -665,7 +672,7 @@ class PoseAdapterNode(Node):
             body_type=self.body_type,
         )
         self.ocr = None
-        
+
         self.get_logger().info("所有模块初始化完成")
 
     def _ros_image_callback(self, msg):
@@ -695,7 +702,7 @@ class PoseAdapterNode(Node):
         msg.step = int(frame.shape[1] * frame.shape[2])
         msg.data = frame.tobytes()
         return msg
-    
+
     @staticmethod
     def _draw_text_cv2(img, text, position, font_scale=0.7, text_color=(255, 255, 0)):
         """用 cv2 绘制文本（更可靠）"""
@@ -710,11 +717,11 @@ class PoseAdapterNode(Node):
             return frame
         except queue.Empty:
             pass
-        
+
         # 回退到 ROS 话题
         if self.camera_image_topic and self.latest_ros_image is not None:
             return self.latest_ros_image.copy()
-        
+
         return None
 
     def _log_throttle(self, level, key, interval_sec, message):
@@ -732,21 +739,21 @@ class PoseAdapterNode(Node):
         """选择追踪目标"""
         if not tracks:
             return None
-        
+
         best_track = None
         min_offset = float('inf')
-        
+
         for track_id, bbox, conf in tracks:
             cx = (bbox[0] + bbox[2]) / 2
             cy = (bbox[1] + bbox[3]) / 2
             image_cx = self.camera_width / 2
             image_cy = self.camera_height / 2
-            
+
             offset = abs(cx - image_cx) + abs(cy - image_cy)
             if offset < min_offset:
                 min_offset = offset
                 best_track = track_id
-        
+
         self.get_logger().info(f"选择目标 ID: {best_track}")
         return best_track
 
@@ -768,14 +775,14 @@ class PoseAdapterNode(Node):
         has_keypts = self.current_keypoints is not None and len(self.current_keypoints) == 4
         has_pose = self.current_pose is not None and self.current_pose.get('success')
         has_cmd = self.current_control_cmd is not None
-        
+
         self.get_logger().info(
             f"[Overlay] draws: detections={det_count}, tracks={track_count}, "
             f"edge={has_edge}, keypoints={has_keypts}, pose={has_pose}, cmd={has_cmd}"
         )
-        
+
         debug_image = debug_image.copy()
-        
+
         # ========== 1. 边缘检测可视化 ==========
         if self.current_edge_image is not None:
             # 将边缘图像叠加到右上角小图
@@ -793,13 +800,13 @@ class PoseAdapterNode(Node):
             cv2.rectangle(debug_image, (roi_x, roi_y), (roi_x+roi_w, roi_y+roi_h), (0, 255, 255), 1)
             cv2.putText(debug_image, "Edge", (roi_x, roi_y-5),
                        cv2.FONT_HERSHEY_SIMPLEX, 0.4, (0, 255, 255), 1)
-        
+
         # ========== 2. YOLO 检测框 ==========
         for x1, y1, x2, y2, conf, cls in self.current_detections:
             cv2.rectangle(debug_image, (x1, y1), (x2, y2), (0, 255, 0), 2)
             cv2.putText(debug_image, f"YOLO:{conf:.2f}", (x1, y1-10),
                        cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 255, 0), 2)
-        
+
         # ========== 3. 追踪框 ==========
         for track_id, bbox, conf in self.current_tracks:
             x1, y1, x2, y2 = bbox
@@ -807,7 +814,7 @@ class PoseAdapterNode(Node):
             cv2.rectangle(debug_image, (x1, y1), (x2, y2), color, 2)
             cv2.putText(debug_image, f"ID:{track_id}", (x1, y1-10),
                        cv2.FONT_HERSHEY_SIMPLEX, 0.6, color, 2)
-        
+
         # ========== 4. 关键点（4个角点） ==========
         if self.current_keypoints is not None and len(self.current_keypoints) == 4:
             for idx, (cx, cy) in enumerate(self.current_keypoints):
@@ -817,7 +824,7 @@ class PoseAdapterNode(Node):
             # 连接角点形成矩形
             pts = np.array(self.current_keypoints, dtype=np.int32)
             cv2.polylines(debug_image, [pts], True, (0, 255, 255), 2)
-        
+
         # ========== 5. PnP 结果（距离 + yaw） ==========
         if self.current_pose is not None and self.current_pose.get('success'):
             distance = self.current_pose.get('distance', 0)
@@ -826,7 +833,7 @@ class PoseAdapterNode(Node):
             # 绘制在右上角
             cv2.rectangle(debug_image, (debug_image.shape[1]-250, 20), (debug_image.shape[1]-10, 50), (0, 0, 0), -1)
             debug_image = self._draw_text_cv2(debug_image, pose_text, (debug_image.shape[1]-280, 40), 0.7, (0, 255, 0))
-        
+
         # ========== 6. 控制命令（中文）==========
         if self.current_control_cmd:
             cmd_text = self.current_control_cmd
@@ -837,7 +844,7 @@ class PoseAdapterNode(Node):
             # 使用 PIL 绘制中文
             text_x = (debug_image.shape[1] - 200) // 2
             debug_image = self._draw_text_cv2(debug_image, cmd_text, (text_x, text_y), 0.8, (255, 255, 0))
-        
+
         # ========== 7. 状态栏 ==========
         status_text = f"Tracks: {len(self.current_tracks)}"
         if self.target_track_id:
@@ -849,7 +856,7 @@ class PoseAdapterNode(Node):
         """执行完整检测→追踪→PnP→控制流程"""
         import time
         pipeline_start = time.time()
-        
+
         # 1. 取图
         cv_image = self._get_image()
         if cv_image is None:
@@ -869,7 +876,7 @@ class PoseAdapterNode(Node):
             cv_image = cv2.resize(cv_image, (self.camera_width, self.camera_height), interpolation=cv2.INTER_LINEAR)
 
         # 3. 格式对齐：保证推流输入严格是 uint8 的 BGR 三通道
-        # 否则 rawvideo(BGR24) 的字节边界会错，导致“雪花/马赛克/Packet corrupt”
+        # 否则 rawvideo(BGR24) 的字节边界会错，导致"雪花/马赛克/Packet corrupt"
         if cv_image.ndim == 2:
             cv_image = cv2.cvtColor(cv_image, cv2.COLOR_GRAY2BGR)
         elif cv_image.ndim == 3:
@@ -882,16 +889,16 @@ class PoseAdapterNode(Node):
             cv_image = cv_image.astype(np.uint8, copy=False)
 
         self.image_shape = cv_image.shape[:2]
-        
+
         if self.detector is None:
             self._init_modules()
-        
+
         self.get_logger().info("[Pipeline] === 步骤1: 取图完成 ===")
-        
+
         # 2. YOLO检测
         detections = self.detector.detect(cv_image)
         self.get_logger().info(f"[Pipeline] === 步骤2: YOLO检测完成，检测到 {len(detections)} 个目标 ===")
-        
+
         # 过滤异常检测框
         h, w = self.image_shape
         valid_detections = []
@@ -906,21 +913,21 @@ class PoseAdapterNode(Node):
                 self.get_logger().warn(f"[Pipeline] 检测框过大({area_ratio:.2f})，丢弃")
                 continue
             valid_detections.append(det)
-        
+
         self.current_detections = valid_detections
-        
+
         # 3. 追踪
         if valid_detections:
             tracks = self.tracker.update(valid_detections)
             self.current_tracks = tracks
-            
+
             if self.target_track_id is None and tracks:
                 self.target_track_id = self._select_target(tracks)
         else:
             self.current_tracks = []
-        
+
         self.get_logger().info(f"[Pipeline] === 步骤3: 追踪完成，{len(self.current_tracks)} 个追踪 ===")
-        
+
         # 无目标时：清空姿态/控制的上一次结果，并且仍继续做推流（背景也要推）。
         if len(self.current_tracks) == 0:
             self.target_track_id = None
@@ -929,11 +936,11 @@ class PoseAdapterNode(Node):
             self.current_pose = None
             self.current_control_cmd = None
             self._log_throttle("warn", "no_target_idle", 2.0, "[Pipeline] 无目标，不下发任何控制指令")
-        
+
         # 图像可视化/推流：RTMP 每个循环都推，保证无检测时也能维持流畅性
         self._frame_count += 1
         debug_image = cv_image.copy()
-        
+
         # ROS topic 发布（可选节流）
         if self.publish_debug_image and self._frame_count % self._debug_image_interval == 0:
             try:
@@ -943,10 +950,10 @@ class PoseAdapterNode(Node):
                 self.debug_image_pub.publish(debug_msg)
             except Exception as e:
                 self.get_logger().error(f"调试图像发布失败: {e}")
-        
+
         # RTMP 推流（不节流，维持直播不断帧）
         self._push_rtmp_frame(debug_image)
-        
+
         # 4. PnP位姿解算 + 5. 控制 + 绘制 overlay
         if self.target_track_id is not None:
             target_track = None
@@ -954,14 +961,14 @@ class PoseAdapterNode(Node):
                 if track_id == self.target_track_id:
                     target_track = (track_id, bbox, conf)
                     break
-            
+
             if target_track is None:
                 self.get_logger().warn("[Pipeline] 丢失目标")
                 self.target_track_id = None
                 return
-            
+
             _, bbox, conf = target_track
-            
+
             # 检查bbox异常
             x1, y1, x2, y2 = bbox
             bw = max(0, x2 - x1)
@@ -971,24 +978,24 @@ class PoseAdapterNode(Node):
                 if area_ratio >= 0.9:
                     self.get_logger().warn(f"[Pipeline] 目标框过大({area_ratio:.2f})")
                     return
-            
+
             # PnP
             keypoints = self.detector.extract_corners(cv_image, bbox)
             # 保存关键点用于可视化
             self.current_keypoints = keypoints
             # 获取边缘检测结果
             self.current_edge_image = self.detector.get_edge_image(cv_image, bbox)
-            
+
             pose = self.pose_solver.solve(bbox, self.image_shape, keypoints=keypoints)
             # 保存PnP结果用于可视化
             self.current_pose = pose
             self.get_logger().info("[Pipeline] === 步骤4: PnP位姿解算完成 ===")
-            
+
             # 控制
             ratio = self.pose_solver.get_target_bbox_ratio(bbox, self.image_shape)
             offset = self.pose_solver.get_center_offset(bbox, self.image_shape)
             cmd = self.controller.compute_control(pose, ratio, offset)
-            
+
             # 保存控制命令描述用于可视化
             if pose.get('success'):
                 distance = pose.get('distance', 0)
@@ -1003,12 +1010,12 @@ class PoseAdapterNode(Node):
                     self.current_control_cmd = "IN_POSITION"
             else:
                 self.current_control_cmd = "STOP"
-            
+
             if cmd is not None:
                 self.cmd_vel_pub.publish(cmd)
-            
+
             self.get_logger().info("[Pipeline] === 步骤5: 控制指令已下发，等待执行完成 ===")
-            
+
             # 等待运动完成
             motion_complete = self.controller.wait_for_motion_complete()
             if motion_complete:
@@ -1017,16 +1024,16 @@ class PoseAdapterNode(Node):
             else:
                 self.get_logger().warn("[Pipeline] 运动执行超时")
                 self._consecutive_timeouts += 1
-                
+
                 if self._consecutive_timeouts >= self._max_consecutive_timeouts:
                     self.get_logger().error(f"[Pipeline] 连续超时{self._max_consecutive_timeouts}次")
                     self.controller.stop()
                     self._consecutive_timeouts = 0
-            
+
             # OCR
             if self.controller.is_ready_for_ocr():
                 self._trigger_ocr(bbox)
-            
+
             # 绘制 overlay（在 PnP 和控制计算完成后）
             if len(self.current_detections) > 0:
                 self._add_debug_overlay(debug_image)
@@ -1035,30 +1042,30 @@ class PoseAdapterNode(Node):
                 self._push_rtmp_frame(debug_image)
         else:
             self._log_throttle("info", "no_target_idle", 2.0, "[Pipeline] 无目标，不下发任何控制指令")
-        
+
         # 统计耗时
         pipeline_elapsed = (time.time() - pipeline_start) * 1000
         self._total_loop_time += pipeline_elapsed
         self._loop_count += 1
         avg_time = self._total_loop_time / self._loop_count if self._loop_count > 0 else 0
-        
+
         self.get_logger().info(f"[Pipeline] 本轮耗时: {pipeline_elapsed:.1f}ms, 平均: {avg_time:.1f}ms")
 
     def run(self):
         """主循环"""
         self.get_logger().info("启动同步主循环")
-        
+
         # 创建定时器 (ROS2)
         timer_period = 1.0 / self.loop_hz
         self._timer = self.create_timer(timer_period, self._execute_pipeline)
-        
+
         # spin 阻塞
         rclpy.spin(self)
 
     def shutdown(self):
         """关闭节点"""
         self.is_running = False
-        
+
         # 停止 RTMP 推流
         if hasattr(self, 'rtmp_process') and self.rtmp_process is not None:
             try:
@@ -1067,20 +1074,20 @@ class PoseAdapterNode(Node):
             except:
                 self.rtmp_process.terminate()
             self.get_logger().info("RTMP 推流已关闭")
-        
+
         if hasattr(self, '_rtmp_ffmpeg_log_fp') and self._rtmp_ffmpeg_log_fp:
             try:
                 self._rtmp_ffmpeg_log_fp.close()
             except:
                 pass
-        
+
         # 停止视觉生产者线程
         self.vision_running = False
         if self.vision_thread:
             self.vision_thread.join(timeout=2.0)
         if self.cap:
             self.cap.release()
-        
+
         if self.controller:
             self.controller.is_running = False
             self.controller.stop()
@@ -1089,7 +1096,7 @@ class PoseAdapterNode(Node):
 
 def main(args=None):
     rclpy.init(args=args)
-    
+
     node = None
     try:
         node = PoseAdapterNode()
