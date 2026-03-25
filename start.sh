@@ -62,7 +62,9 @@ download_mediamtx() {
 
 ensure_mediamtx() {
     # 如果配置了本地 RTMP，推流地址包含 127.0.0.1，则自动启动 mediamtx
-    local rtmp_url="$(grep -E '^\s*rtmp_url:' "$SCRIPT_DIR/config/params.yaml" 2>/dev/null | head -1 | sed 's/.*rtmp_url:*[[:space:]]*//' | tr -d '"' | tr -d "'")"
+    local rtmp_url="$(grep -E 'rtmp_url:' "$SCRIPT_DIR/config/params.yaml" 2>/dev/null | grep -v '^#' | head -1 | sed 's/.*rtmp_url:*[[:space:]]*//' | tr -d '"' | tr -d "'")"
+    
+    echo "检测 RTMP 配置: $rtmp_url"
     
     if [[ "$rtmp_url" == "127.0.0.1"* ]] || [[ "$rtmp_url" == "localhost"* ]]; then
         # 检查 mediamtx 是否已运行
