@@ -24,6 +24,80 @@ export ZSI_DOG_IP="${ZSI_DOG_IP:-192.168.234.1}"
 
 mkdir -p "$LOG_DIR"
 
+# 本地 RTSP 流媒体服务
+MEDIAMTX_DIR="$SCRIPT_DIR/mediamtx"
+MEDIAMTX_BIN="$MEDIAMTX_DIR/mediamtx"
+MEDIAMTX_YAML="$MEDIAMTX_DIR/mediamtx.yml"
+
+download_mediamtx() {
+    if [ ! -f "$MEDIAMTX_BIN" ]; then
+        echo "首次使用，正在下载 mediamtx..."
+        mkdir -p "$MEDIAMTX_DIR"
+        
+        ARCH=$(uname -m)
+        case "$ARCH" in
+            x86_64)
+                URL="https://github.com/bluenviron/mediamtx/releases/download/v1.12.1/mediamtx_v1.12.1_linux_amd64.tar.gz"
+                ;;
+            aarch64|arm64)
+                URL="https://github.com/bluenviron/mediamtx/releases/download/v1.12.1/mediamtx_v1.12.1_linux_arm64.tar.gz"
+                ;;
+            *)
+                echo "不支持的架构: $ARCH"
+                return 1
+                ;;
+        esac
+        
+        cd "$MEDIAMTX_DIR"
+        curl -L -o mediamtx.tar.gz "$URL" 2>/dev/null || {
+            echo "下载 mediamtx 失败，请检查网络"
+            return 1
+        }
+        tar -xzf mediamtx.tar.gz
+        rm -f mediamtx.tar.gz
+        chmod +x mediamtx
+        echo "mediamtx 下载完成"
+    fi
+}
+
+ensure_mediamtx() {
+    # 如果配置了本地 RTMP，推流地址包含 127.0.0.1，则自动启动 mediamtx
+    local rtmp_url="$(grep -E '^\s*rtmp_url:' "$SCRIPT_DIR/config/params.yaml" 2>/dev/null | head -1 | sed 's/.*rtmp_url:*[[:space:]]*//' | tr -d '"' | tr -d "'")"
+    
+    if [[ "$rtmp_url" == "127.0.0.1"* ]] || [[ "$rtmp_url" == "localhost"* ]]; then
+        # 检查 mediamtx 是否已运行
+        if ! pgrep -f "mediamtx" > /dev/null 2>&1; then
+            download_mediamtx || return
+            
+            # 创建默认配置
+            if [ ! -f "$MEDIAMTX_YAML" ]; then
+                cat > "$MEDIAMTX_YAML" << 'EOF'
+rtspAddress: :8554
+protocols: [tcp, udp]
+encryption: "no"
+rtmpAddress: :8554
+webrtcAddress: :8888
+srtAddress: :8890
+logLevel: info
+logDestinations: [console]
+EOF
+            fi
+            
+            echo "启动本地 RTSP 流媒体服务..."
+            cd "$MEDIAMTX_DIR"
+            nohup ./mediamtx "$MEDIAMTX_YAML" >> "$LOG_DIR/mediamtx.log" 2>&1 &
+            sleep 2
+            echo "mediamtx 已启动"
+        fi
+        
+        echo "=========================================="
+        echo "本地流服务已启动"
+        echo "RTSP 拉流地址: rtsp://127.0.0.1:8554/pose"
+        echo "WebRTC 拉流地址: webrtc://127.0.0.1:8888/pose"
+        echo "=========================================="
+    fi
+}
+
 is_running() {
   if [ -f "$PID_FILE" ]; then
     pid="$(cat "$PID_FILE" 2>/dev/null || true)"
@@ -103,6 +177,9 @@ start_service() {
   ensure_model_file
   ensure_env
   check_port_conflict
+  
+  # 启动本地流媒体服务
+  ensure_mediamtx
 
   echo "启动 pose_adapter..."
   echo "BODY=$BODY, ZSI_SDK_ROOT=$ZSI_SDK_ROOT"
@@ -159,6 +236,12 @@ stop_service() {
   else
     echo "端口 43988 已释放"
   fi
+  
+  # 停止 mediamtx（可选，如果需要持续运行则注释掉下面这行）
+  # if pgrep -f "mediamtx" > /dev/null 2>&1; then
+  #   pkill -f "mediamtx" 2>/dev/null || true
+  #   echo "mediamtx 已停止"
+  # fi
 
   rm -f "$PID_FILE"
   echo "stop 完成"
