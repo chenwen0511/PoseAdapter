@@ -459,6 +459,8 @@ class PoseAdapterNode(Node):
 
     def _push_rtmp_frame(self, cv_image):
         """推送帧到 RTMP"""
+        self.get_logger().info(f"[RTMP _push] 开始推流, rtmp_process={self.rtmp_process is not None}")
+        
         if self.rtmp_process is None or self.rtmp_process.stdin is None:
             # 兜底：若 ffmpeg 尚未就绪/已崩，则尝试重新初始化（避免写入无效 stdin）
             now = time.time()
@@ -1038,8 +1040,9 @@ class PoseAdapterNode(Node):
             if len(self.current_detections) > 0:
                 self._add_debug_overlay(debug_image)
                 # 推流带 overlay 的帧
-                self.get_logger().info(f"[RTMP] 推送 overlay 帧，frame={self._frame_count}")
+                self.get_logger().info(f"[RTMP] 准备推送 overlay 帧，frame={self._frame_count}, shape={debug_image.shape}")
                 self._push_rtmp_frame(debug_image)
+                self.get_logger().info(f"[RTMP] 推送完成")
         else:
             self._log_throttle("info", "no_target_idle", 2.0, "[Pipeline] 无目标，不下发任何控制指令")
 
