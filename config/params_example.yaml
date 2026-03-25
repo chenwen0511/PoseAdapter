@@ -47,4 +47,11 @@ tracking:
 
 display:
   publish_debug_image: false     # 是否发布调试图像到 /pose_adapter/debug_image
-  rtmp_url: "rtmp://robotsolution.cn:1935/dksl/stream/ROBOT_DOG_001_99-0-0_adapter-0?sign=xxxx"  # RTMP 推流地址，留空则不推流
+  # 本地 RTSP 推流（推荐）
+  # 1. 先启动本地 mediamtx: ./scripts/start_mediamtx.sh start
+  # 2. 设置下面的 RTMP 地址指向本地
+  rtmp_url: "rtmp://127.0.0.1:8554/pose"  # 本地 RTMP 推流地址
+  # 拉流地址: rtsp://127.0.0.1:8554/pose
+  # 
+  # 远程推流（如果有外网服务器）
+  # rtmp_url: "rtmp://robotsolution.cn:1935/dksl/stream/ROBOT_DOG_001_99-0-0_adapter-0?sign=xxxx"
