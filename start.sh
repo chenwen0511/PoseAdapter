@@ -66,7 +66,8 @@ ensure_mediamtx() {
     
     echo "检测 RTMP 配置: $rtmp_url"
     
-    if [[ -n "$rtmp_url" ]] && ([[ "$rtmp_url" == "127.0.0.1"* ]] || [[ "$rtmp_url" == "localhost"* ]]); then
+    # 兼容完整 URL 形式：例如 rtmp://127.0.0.1:1935/pose
+    if [[ -n "$rtmp_url" ]] && ([[ "$rtmp_url" == *"127.0.0.1"* ]] || [[ "$rtmp_url" == *"localhost"* ]]); then
         # 检查 mediamtx 是否已运行
         if ! pgrep -f "mediamtx" > /dev/null 2>&1; then
             download_mediamtx || return
@@ -77,7 +78,7 @@ ensure_mediamtx() {
 rtspAddress: :8554
 protocols: [tcp, udp]
 encryption: "no"
-rtmpAddress: :8554
+rtmpAddress: :1935
 webrtcAddress: :8888
 srtAddress: :8890
 logLevel: info
@@ -95,6 +96,7 @@ EOF
         echo "=========================================="
         echo "本地流服务已启动"
         echo "RTSP 拉流地址: rtsp://127.0.0.1:8554/pose"
+        echo "RTSP 拉流地址(局域网): rtsp://192.168.100.174:8554/pose"
         echo "WebRTC 拉流地址: webrtc://127.0.0.1:8888/pose"
         echo "=========================================="
     fi
@@ -239,11 +241,14 @@ stop_service() {
     echo "端口 43988 已释放"
   fi
   
-  # 停止 mediamtx（可选，如果需要持续运行则注释掉下面这行）
-  # if pgrep -f "mediamtx" > /dev/null 2>&1; then
-  #   pkill -f "mediamtx" 2>/dev/null || true
-  #   echo "mediamtx 已停止"
-  # fi
+  # 停止 mediamtx：与 ensure_mediamtx 的“本地地址”逻辑保持一致
+  local_rtmp_url="$(grep -E '^\s*rtmp_url:' "$SCRIPT_DIR/config/params.yaml" 2>/dev/null | grep -v '^#' | head -1 | sed 's/.*rtmp_url:*[[:space:]]*//' | sed 's/#.*//' | tr -d '"' | tr -d "'" | xargs)"
+  if [[ -n "$local_rtmp_url" ]] && ([[ "$local_rtmp_url" == *"127.0.0.1"* ]] || [[ "$local_rtmp_url" == *"localhost"* ]]); then
+    if pgrep -f "mediamtx" > /dev/null 2>&1; then
+      pkill -f "mediamtx" 2>/dev/null || true
+      echo "mediamtx 已停止"
+    fi
+  fi
 
   rm -f "$PID_FILE"
   echo "stop 完成"
