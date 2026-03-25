@@ -13,6 +13,7 @@ from rclpy.qos import QoSProfile, ReliabilityPolicy, HistoryPolicy
 from sensor_msgs.msg import Image
 from geometry_msgs.msg import Twist
 import cv2
+from PIL import Image, ImageDraw, ImageFont
 import queue
 import threading
 import time
@@ -83,6 +84,16 @@ class PoseAdapterNode(Node):
         self._consecutive_timeouts = 0
         self._max_consecutive_timeouts = 3
         self._pause_duration = 2.0
+        
+        # 新增：调试可视化状态
+        self.current_edge_image = None  # 边缘检测结果
+        self.current_keypoints = None   # 4个角点坐标
+        self.current_pose = None        # PnP解算结果 (distance, yaw)
+        self.current_control_cmd = None # 控制命令描述
+        
+        # RTMP 推流
+        self.rtmp_writer = None
+        self._init_rtmp_stream()
         
         # 使用 Go2 相机 SDK
         if self.use_go2_camera:
@@ -192,6 +203,13 @@ class PoseAdapterNode(Node):
         self.camera_image_topic = self.get_parameter('camera_image_topic').value
         self.image_save_path = self.get_parameter('image_save_path').value
         self.rtsp_url = self.get_parameter('rtsp_url').value
+        
+        # 调试可视化参数
+        self.declare_parameter('publish_debug_image', True)
+        self.declare_parameter('rtmp_url', '')
+        
+        self.publish_debug_image = self.get_parameter('publish_debug_image').value
+        self.rtmp_url = self.get_parameter('rtmp_url').value
 
         # 性能统计
         self._total_loop_time = 0.0
@@ -241,6 +259,58 @@ class PoseAdapterNode(Node):
                 self.cap = cv2.VideoCapture(self.rtsp_url)
                 self.cap.set(cv2.CAP_PROP_BUFFERSIZE, 1)
                 time.sleep(0.5)
+    
+    def _init_rtmp_stream(self):
+        """初始化 RTMP 推流"""
+        # 检查是否启用调试图像
+        if not self.publish_debug_image:
+            self.get_logger().info("调试图像已禁用 (publish_debug_image=false)")
+            return
+        
+        rtmp_url = self.rtmp_url
+        if not rtmp_url:
+            self.get_logger().info("未设置 rtmp_url，跳过推流初始化")
+            return
+        
+        try:
+            # 检查 ffmpeg 是否可用
+            import subprocess
+            result = subprocess.run(['which', 'ffmpeg'], capture_output=True)
+            if result.returncode != 0:
+                self.get_logger().warn("ffmpeg 未安装，无法推流")
+                return
+            
+            # 使用 ffmpeg 推流
+            cmd = [
+                'ffmpeg',
+                '-f', 'rawvideo',
+                '-pix_fmt', 'bgr24',
+                '-s', f'{self.camera_width}x{self.camera_height}',
+                '-r', '10',
+                '-i', '-',
+                '-c:v', 'libx264',
+                '-preset', 'ultrafast',
+                '-tune', 'zerolatency',
+                '-b', '1000k',
+                '-f', 'flv',
+                rtmp_url
+            ]
+            
+            self.rtmp_process = subprocess.Popen(cmd, stdin=subprocess.PIPE, stderr=subprocess.DEVNULL)
+            self.get_logger().info(f"RTMP 推流已启动: {rtmp_url}")
+        except Exception as e:
+            self.get_logger().warn(f"RTMP 推流初始化失败: {e}")
+            self.rtmp_process = None
+    
+    def _push_rtmp_frame(self, cv_image):
+        """推送帧到 RTMP"""
+        if self.rtmp_process is None or self.rtmp_process.stdin is None:
+            return
+        
+        try:
+            self.rtmp_process.stdin.write(cv_image.tobytes())
+        except Exception as e:
+            self.get_logger().warn(f"RTMP 推流失败: {e}")
     
     def _load_calib_from_file(self):
         """从标定文件加载相机内参"""
@@ -395,6 +465,26 @@ class PoseAdapterNode(Node):
         msg.step = int(frame.shape[1] * frame.shape[2])
         msg.data = frame.tobytes()
         return msg
+    
+    @staticmethod
+    def _draw_chinese_text(img, text, position, font_size=24, text_color=(255, 255, 0)):
+        """在图像上绘制中文文本"""
+        # 转换为 PIL 图像
+        pil_img = Image.fromarray(cv2.cvtColor(img, cv2.COLOR_BGR2RGB))
+        draw = ImageDraw.Draw(pil_img)
+        
+        # 尝试加载中文字体
+        font_path = '/usr/share/fonts/truetype/droid/DroidSansFallbackFull.ttf'
+        try:
+            font = ImageFont.truetype(font_path, font_size)
+        except:
+            font = ImageFont.load_default()
+        
+        # 绘制文本
+        draw.text(position, text, font=font, fill=text_color + (255,))
+        
+        # 转回 OpenCV 图像
+        return cv2.cvtColor(np.array(pil_img), cv2.COLOR_RGB2BGR)
 
     def _get_image(self):
         """消费者：优先从队列消费最新 RTSP 帧"""
@@ -453,16 +543,38 @@ class PoseAdapterNode(Node):
         self.get_logger().info("触发 OCR 识别...")
 
     def _publish_debug_image(self, cv_image):
-        """发布调试图像"""
+        """发布调试图像（带完整可视化）"""
+        # 如果禁用了调试图像，直接跳过
+        if not self.publish_debug_image:
+            return
+        
         debug_image = cv_image.copy()
         
-        # 绘制检测框
+        # ========== 1. 边缘检测可视化 ==========
+        if self.current_edge_image is not None:
+            # 将边缘图像叠加到右上角小图
+            h, w = debug_image.shape[:2]
+            edge_h, edge_w = self.current_edge_image.shape[:2]
+            # 缩放边缘图
+            scale = min(200 / edge_h, 300 / edge_w)
+            edge_small = cv2.resize(self.current_edge_image, (int(edge_w * scale), int(edge_h * scale)))
+            # 叠加到左上角
+            roi_y, roi_x = 10, 10
+            roi_h, roi_w = edge_small.shape[:2]
+            if roi_y + roi_h < h and roi_x + roi_w < w:
+                debug_image[roi_y:roi_y+roi_h, roi_x:roi_x+roi_w] = edge_small
+            # 边框
+            cv2.rectangle(debug_image, (roi_x, roi_y), (roi_x+roi_w, roi_y+roi_h), (0, 255, 255), 1)
+            cv2.putText(debug_image, "Edge", (roi_x, roi_y-5),
+                       cv2.FONT_HERSHEY_SIMPLEX, 0.4, (0, 255, 255), 1)
+        
+        # ========== 2. YOLO 检测框 ==========
         for x1, y1, x2, y2, conf, cls in self.current_detections:
             cv2.rectangle(debug_image, (x1, y1), (x2, y2), (0, 255, 0), 2)
-            cv2.putText(debug_image, f"{conf:.2f}", (x1, y1-10),
+            cv2.putText(debug_image, f"YOLO:{conf:.2f}", (x1, y1-10),
                        cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 255, 0), 2)
         
-        # 绘制追踪框
+        # ========== 3. 追踪框 ==========
         for track_id, bbox, conf in self.current_tracks:
             x1, y1, x2, y2 = bbox
             color = (0, 0, 255) if track_id == self.target_track_id else (255, 0, 0)
@@ -470,25 +582,44 @@ class PoseAdapterNode(Node):
             cv2.putText(debug_image, f"ID:{track_id}", (x1, y1-10),
                        cv2.FONT_HERSHEY_SIMPLEX, 0.6, color, 2)
         
-        # 绘制角点
-        if self.target_track_id is not None:
-            for track_id, bbox, conf in self.current_tracks:
-                if track_id == self.target_track_id:
-                    x1, y1, x2, y2 = bbox
-                    corners = [(x1, y2), (x2, y2), (x2, y1), (x1, y1)]
-                    for idx, (cx, cy) in enumerate(corners):
-                        cv2.circle(debug_image, (int(cx), int(cy)), 5, (0, 255, 255), -1)
-                        cv2.putText(debug_image, str(idx), (int(cx)+3, int(cy)-3),
-                                   cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 255, 255), 1)
-                    break
+        # ========== 4. 关键点（4个角点） ==========
+        if self.current_keypoints is not None and len(self.current_keypoints) == 4:
+            for idx, (cx, cy) in enumerate(self.current_keypoints):
+                cv2.circle(debug_image, (int(cx), int(cy)), 8, (0, 255, 255), -1)
+                cv2.putText(debug_image, str(idx), (int(cx)+8, int(cy)-8),
+                           cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 255, 255), 2)
+            # 连接角点形成矩形
+            pts = np.array(self.current_keypoints, dtype=np.int32)
+            cv2.polylines(debug_image, [pts], True, (0, 255, 255), 2)
         
-        # 状态信息
+        # ========== 5. PnP 结果（距离 + yaw） ==========
+        if self.current_pose is not None and self.current_pose.get('success'):
+            distance = self.current_pose.get('distance', 0)
+            yaw = self.current_pose.get('yaw', 0)
+            pose_text = f"Dist: {distance:.2f}m | Yaw: {yaw:.1f}deg"
+            # 绘制在右上角
+            cv2.rectangle(debug_image, (debug_image.shape[1]-250, 20), (debug_image.shape[1]-10, 50), (0, 0, 0), -1)
+            debug_image = self._draw_chinese_text(debug_image, pose_text, (debug_image.shape[1]-240, 25), 22, (0, 255, 0))
+        
+        # ========== 6. 控制命令（中文）==========
+        if self.current_control_cmd:
+            cmd_text = self.current_control_cmd
+            # 绘制在底部中间，先用英文估算位置
+            text_y = debug_image.shape[0] - 30
+            # 背景条
+            cv2.rectangle(debug_image, (100, text_y-25), (debug_image.shape[1]-100, text_y+10), (0, 0, 0), -1)
+            # 使用 PIL 绘制中文
+            text_x = (debug_image.shape[1] - 200) // 2
+            debug_image = self._draw_chinese_text(debug_image, cmd_text, (text_x, text_y-5), 28, (255, 255, 0))
+        
+        # ========== 7. 状态栏 ==========
         status_text = f"Tracks: {len(self.current_tracks)}"
         if self.target_track_id:
             status_text += f" | Target: {self.target_track_id}"
         cv2.putText(debug_image, status_text, (10, 30),
                    cv2.FONT_HERSHEY_SIMPLEX, 0.7, (255, 255, 255), 2)
         
+        # 发布 ROS topic
         try:
             debug_msg = self._bgr_to_ros_image(debug_image)
             debug_msg.header.stamp = self.get_clock().now().to_msg()
@@ -496,6 +627,10 @@ class PoseAdapterNode(Node):
             self.debug_image_pub.publish(debug_msg)
         except Exception as e:
             self.get_logger().error(f"调试图像发布失败: {e}")
+        
+        # RTMP 推流
+        if self.rtmp_process is not None:
+            self._push_rtmp_frame(debug_image)
 
     def _execute_pipeline(self):
         """执行完整检测→追踪→PnP→控制流程"""
@@ -585,13 +720,35 @@ class PoseAdapterNode(Node):
             
             # PnP
             keypoints = self.detector.extract_corners(cv_image, bbox)
+            # 保存关键点用于可视化
+            self.current_keypoints = keypoints
+            # 获取边缘检测结果
+            self.current_edge_image = self.detector.get_edge_image(cv_image, bbox)
+            
             pose = self.pose_solver.solve(bbox, self.image_shape, keypoints=keypoints)
+            # 保存PnP结果用于可视化
+            self.current_pose = pose
             self.get_logger().info("[Pipeline] === 步骤4: PnP位姿解算完成 ===")
             
             # 控制
             ratio = self.pose_solver.get_target_bbox_ratio(bbox, self.image_shape)
             offset = self.pose_solver.get_center_offset(bbox, self.image_shape)
             cmd = self.controller.compute_control(pose, ratio, offset)
+            
+            # 保存控制命令描述用于可视化
+            if pose.get('success'):
+                distance = pose.get('distance', 0)
+                yaw = pose.get('yaw', 0)
+                dist_diff = abs(distance - self.target_distance)
+                if abs(yaw) > self.controller.angle_tolerance:
+                    self.current_control_cmd = f"ROTATE {yaw:.1f}deg"
+                elif dist_diff > self.distance_tolerance:
+                    direction = "FORWARD" if distance > self.target_distance else "BACKWARD"
+                    self.current_control_cmd = f"{direction} {dist_diff:.2f}m"
+                else:
+                    self.current_control_cmd = "IN_POSITION"
+            else:
+                self.current_control_cmd = "STOP"
             
             if cmd is not None:
                 self.cmd_vel_pub.publish(cmd)
@@ -640,6 +797,15 @@ class PoseAdapterNode(Node):
     def shutdown(self):
         """关闭节点"""
         self.is_running = False
+        
+        # 停止 RTMP 推流
+        if hasattr(self, 'rtmp_process') and self.rtmp_process is not None:
+            try:
+                self.rtmp_process.stdin.close()
+                self.rtmp_process.wait(timeout=2)
+            except:
+                self.rtmp_process.terminate()
+            self.get_logger().info("RTMP 推流已关闭")
         
         # 停止视觉生产者线程
         self.vision_running = False

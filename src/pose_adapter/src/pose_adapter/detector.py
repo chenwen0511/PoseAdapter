@@ -267,3 +267,36 @@ class MeterDetector:
         bottom_left = remaining[1]
         
         return [top_left, top_right, bottom_right, bottom_left]
+    
+    def get_edge_image(self, cv_image, bbox):
+        """获取边缘检测结果图像（Canny边缘 + 轮廓）"""
+        x1, y1, x2, y2 = bbox
+        
+        h, w = cv_image.shape[:2]
+        margin = 5
+        x1 = max(0, x1 - margin)
+        y1 = max(0, y1 - margin)
+        x2 = min(w, x2 + margin)
+        y2 = min(h, y2 + margin)
+        
+        roi = cv_image[y1:y2, x1:x2]
+        if roi.size == 0:
+            return None
+        
+        gray = cv2.cvtColor(roi, cv2.COLOR_BGR2GRAY)
+        blurred = cv2.GaussianBlur(gray, (5, 5), 0)
+        edges = cv2.Canny(blurred, 50, 150)
+        
+        kernel = cv2.getStructuringElement(cv2.MORPH_RECT, (3, 3))
+        edges = cv2.morphologyEx(edges, cv2.MORPH_CLOSE, kernel)
+        
+        # 查找轮廓并绘制
+        contours, _ = cv2.findContours(edges, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+        
+        # 创建彩色边缘图
+        edge_vis = cv2.cvtColor(edges, cv2.COLOR_GRAY2BGR)
+        
+        # 用红色绘制轮廓
+        cv2.drawContours(edge_vis, contours, -1, (0, 0, 255), 2)
+        
+        return edge_vis

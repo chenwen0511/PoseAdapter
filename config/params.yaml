@@ -44,3 +44,7 @@ tracking:
   max_age: 30
   min_hits: 3
   iou_threshold: 0.3
+
+# 调试可视化参数（顶层）
+publish_debug_image: true      # 是否发布调试图像到 /pose_adapter/debug_image
+rtmp_url: ""                  # RTMP 推流地址，留空则不推流
