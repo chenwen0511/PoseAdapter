@@ -697,24 +697,11 @@ class PoseAdapterNode(Node):
         return msg
     
     @staticmethod
-    def _draw_chinese_text(img, text, position, font_size=24, text_color=(255, 255, 0)):
-        """在图像上绘制中文文本"""
-        # 转换为 PIL 图像
-        pil_img = PILImage.fromarray(cv2.cvtColor(img, cv2.COLOR_BGR2RGB))
-        draw = ImageDraw.Draw(pil_img)
-        
-        # 尝试加载中文字体
-        font_path = '/usr/share/fonts/truetype/droid/DroidSansFallbackFull.ttf'
-        try:
-            font = ImageFont.truetype(font_path, font_size)
-        except:
-            font = ImageFont.load_default()
-        
-        # 绘制文本
-        draw.text(position, text, font=font, fill=text_color + (255,))
-        
-        # 转回 OpenCV 图像
-        return cv2.cvtColor(np.array(pil_img), cv2.COLOR_RGB2BGR)
+    def _draw_text_cv2(img, text, position, font_scale=0.7, text_color=(255, 255, 0)):
+        """用 cv2 绘制文本（更可靠）"""
+        x, y = position
+        cv2.putText(img, text, (x, y), cv2.FONT_HERSHEY_SIMPLEX, font_scale, text_color, 2)
+        return img
 
     def _get_image(self):
         """消费者：优先从队列消费最新 RTSP 帧"""
@@ -838,7 +825,7 @@ class PoseAdapterNode(Node):
             pose_text = f"Dist: {distance:.2f}m | Yaw: {yaw:.1f}deg"
             # 绘制在右上角
             cv2.rectangle(debug_image, (debug_image.shape[1]-250, 20), (debug_image.shape[1]-10, 50), (0, 0, 0), -1)
-            debug_image = self._draw_chinese_text(debug_image, pose_text, (debug_image.shape[1]-240, 25), 22, (0, 255, 0))
+            debug_image = self._draw_text_cv2(debug_image, pose_text, (debug_image.shape[1]-280, 40), 0.7, (0, 255, 0))
         
         # ========== 6. 控制命令（中文）==========
         if self.current_control_cmd:
@@ -849,7 +836,7 @@ class PoseAdapterNode(Node):
             cv2.rectangle(debug_image, (100, text_y-25), (debug_image.shape[1]-100, text_y+10), (0, 0, 0), -1)
             # 使用 PIL 绘制中文
             text_x = (debug_image.shape[1] - 200) // 2
-            debug_image = self._draw_chinese_text(debug_image, cmd_text, (text_x, text_y-5), 28, (255, 255, 0))
+            debug_image = self._draw_text_cv2(debug_image, cmd_text, (text_x, text_y), 0.8, (255, 255, 0))
         
         # ========== 7. 状态栏 ==========
         status_text = f"Tracks: {len(self.current_tracks)}"
