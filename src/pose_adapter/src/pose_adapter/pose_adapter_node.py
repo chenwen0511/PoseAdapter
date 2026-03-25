@@ -954,7 +954,10 @@ class PoseAdapterNode(Node):
                 self.get_logger().error(f"调试图像发布失败: {e}")
 
         # RTMP 推流（不节流，维持直播不断帧）
-        self._push_rtmp_frame(debug_image)
+        try:
+            self._push_rtmp_frame(debug_image)
+        except Exception as e:
+            self.get_logger().error(f"[RTMP] 调用失败: {e}")
 
         # 4. PnP位姿解算 + 5. 控制 + 绘制 overlay
         if self.target_track_id is not None:
@@ -1041,8 +1044,11 @@ class PoseAdapterNode(Node):
                 self._add_debug_overlay(debug_image)
                 # 推流带 overlay 的帧
                 self.get_logger().info(f"[RTMP] 准备推送 overlay 帧，frame={self._frame_count}, shape={debug_image.shape}")
-                self._push_rtmp_frame(debug_image)
-                self.get_logger().info(f"[RTMP] 推送完成")
+                try:
+                    self._push_rtmp_frame(debug_image)
+                    self.get_logger().info(f"[RTMP] 推送完成")
+                except Exception as e:
+                    self.get_logger().error(f"[RTMP] 调用失败: {e}")
         else:
             self._log_throttle("info", "no_target_idle", 2.0, "[Pipeline] 无目标，不下发任何控制指令")
 
