@@ -262,11 +262,7 @@ class PoseAdapterNode(Node):
     
     def _init_rtmp_stream(self):
         """初始化 RTMP 推流"""
-        # 检查是否启用调试图像
-        if not self.publish_debug_image:
-            self.get_logger().info("调试图像已禁用 (publish_debug_image=false)")
-            return
-        
+        # RTMP 推流初始化（独立于 publish_debug_image）
         rtmp_url = self.rtmp_url
         if not rtmp_url:
             self.get_logger().info("未设置 rtmp_url，跳过推流初始化")
@@ -542,12 +538,8 @@ class PoseAdapterNode(Node):
             self.ocr = MeterOCR(use_paddle=self.use_paddle_ocr, logger=self.get_logger())
         self.get_logger().info("触发 OCR 识别...")
 
-    def _publish_debug_image(self, cv_image):
+    def _add_debug_overlay(self, debug_image):
         """发布调试图像（带完整可视化）"""
-        # 如果禁用了调试图像，直接跳过
-        if not self.publish_debug_image:
-            return
-        
         debug_image = cv_image.copy()
         
         # ========== 1. 边缘检测可视化 ==========
@@ -618,19 +610,6 @@ class PoseAdapterNode(Node):
             status_text += f" | Target: {self.target_track_id}"
         cv2.putText(debug_image, status_text, (10, 30),
                    cv2.FONT_HERSHEY_SIMPLEX, 0.7, (255, 255, 255), 2)
-        
-        # 发布 ROS topic
-        try:
-            debug_msg = self._bgr_to_ros_image(debug_image)
-            debug_msg.header.stamp = self.get_clock().now().to_msg()
-            debug_msg.header.frame_id = "camera"
-            self.debug_image_pub.publish(debug_msg)
-        except Exception as e:
-            self.get_logger().error(f"调试图像发布失败: {e}")
-        
-        # RTMP 推流
-        if self.rtmp_process is not None:
-            self._push_rtmp_frame(debug_image)
 
     def _execute_pipeline(self):
         """执行完整检测→追踪→PnP→控制流程"""
@@ -688,10 +667,26 @@ class PoseAdapterNode(Node):
             self._log_throttle("warn", "no_target_idle", 2.0, "[Pipeline] 无目标，不下发任何控制指令")
             return
         
-        # 发布调试图像
+        # 发布调试图像（独立控制）
         self._frame_count += 1
         if self._frame_count % self._debug_image_interval == 0:
-            self._publish_debug_image(cv_image)
+            debug_image = cv_image.copy()
+            # 添加可视化 overlay
+            self._add_debug_overlay(debug_image)
+            
+            # ROS topic 发布
+            if self.publish_debug_image:
+                try:
+                    debug_msg = self._bgr_to_ros_image(debug_image)
+                    debug_msg.header.stamp = self.get_clock().now().to_msg()
+                    debug_msg.header.frame_id = "camera"
+                    self.debug_image_pub.publish(debug_msg)
+                except Exception as e:
+                    self.get_logger().error(f"调试图像发布失败: {e}")
+            
+            # RTMP 推流
+            if self.rtmp_process is not None:
+                self._push_rtmp_frame(debug_image)
         
         # 4. PnP位姿解算 + 5. 控制
         if self.target_track_id is not None:
