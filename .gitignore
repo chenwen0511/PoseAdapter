@@ -64,3 +64,6 @@ Desktop.ini
 .env.*
 *.pem
 secrets.yaml
+
+# 实际配置文件，勿提交
+config/params.yaml
