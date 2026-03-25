@@ -91,9 +91,8 @@ class PoseAdapterNode(Node):
         self.current_pose = None        # PnP解算结果 (distance, yaw)
         self.current_control_cmd = None # 控制命令描述
         
-        # RTMP 推流
+        # RTMP 推流（稍后初始化）
         self.rtmp_writer = None
-        self._init_rtmp_stream()
         
         # 使用 Go2 相机 SDK
         if self.use_go2_camera:
@@ -210,6 +209,9 @@ class PoseAdapterNode(Node):
         
         self.publish_debug_image = self.get_parameter('publish_debug_image').value
         self.rtmp_url = self.get_parameter('rtmp_url').value
+        
+        # 初始化 RTMP 推流
+        self._init_rtmp_stream()
 
         # 性能统计
         self._total_loop_time = 0.0
