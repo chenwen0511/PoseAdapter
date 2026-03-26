@@ -198,3 +198,26 @@ python3.10 tests/test_pipeline.py
 - OpenCV
 - NumPy
 - (可选) YOLOv8 / PaddleOCR
+
+---
+
+## 更新日志
+
+### 2025-03-25
+
+**RTMP 推流异常处理优化**
+
+- 在 `_push_rtmp_frame` 调用处添加 try-except 异常捕获
+- 新增 RTMP 调用失败的详细错误日志，便于排查推流异常问题
+- 修改文件：`src/pose_adapter/src/pose_adapter/pose_adapter_node.py`
+
+```python
+# 修改前
+self._push_rtmp_frame(debug_image)
+
+# 修改后
+try:
+    self._push_rtmp_frame(debug_image)
+except Exception as e:
+    self.get_logger().error(f"[RTMP] 调用失败: {e}")
+```
