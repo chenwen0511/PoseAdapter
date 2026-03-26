@@ -221,3 +221,14 @@ try:
 except Exception as e:
     self.get_logger().error(f"[RTMP] 调用失败: {e}")
 ```
+
+**推流架构说明**
+
+```
+PoseAdapter ──RTMP──> mediamtx ──RTSP──> 客户端
+              rtmp://127.0.0.1:8554/pose   rtsp://127.0.0.1:8554/pose
+```
+
+- **RTMP**：用于推流（PoseAdapter → mediamtx）
+- **RTSP**：用于拉流（客户端 → mediamtx）
+- mediamtx 同时支持两种协议，做协议转换，这是业界标准做法
