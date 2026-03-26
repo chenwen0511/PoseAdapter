@@ -783,7 +783,8 @@ class PoseAdapterNode(Node):
             f"edge={has_edge}, keypoints={has_keypts}, pose={has_pose}, cmd={has_cmd}"
         )
 
-        debug_image = debug_image.copy()
+        # 注意：必须在调用方传入的 debug_image 上就地绘制。
+        # 若此处 debug_image.copy()，绘制只会作用在副本上，_push_rtmp_frame 仍推原图，导致 RTSP 看不到 overlay。
 
         # ========== 1. 边缘检测可视化 ==========
         if self.current_edge_image is not None:
@@ -853,6 +854,8 @@ class PoseAdapterNode(Node):
             status_text += f" | Target: {self.target_track_id}"
         cv2.putText(debug_image, status_text, (10, 30),
                    cv2.FONT_HERSHEY_SIMPLEX, 0.7, (255, 255, 255), 2)
+
+        return debug_image
 
     def _execute_pipeline(self):
         """执行完整检测→追踪→PnP→控制流程"""
@@ -1041,7 +1044,7 @@ class PoseAdapterNode(Node):
 
             # 绘制 overlay（在 PnP 和控制计算完成后）
             if len(self.current_detections) > 0:
-                self._add_debug_overlay(debug_image)
+                debug_image = self._add_debug_overlay(debug_image)
                 # 推流带 overlay 的帧
                 self.get_logger().info(f"[RTMP] 准备推送 overlay 帧，frame={self._frame_count}, shape={debug_image.shape}")
                 try:
