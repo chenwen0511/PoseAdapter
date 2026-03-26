@@ -1012,8 +1012,14 @@ class PoseAdapterNode(Node):
                 if abs(yaw) > self.controller.angle_tolerance:
                     self.current_control_cmd = f"ROTATE {yaw:.1f}deg"
                 elif dist_diff > self.distance_tolerance:
+                    # 平滑衰减：距离越远，步长系数越小，避免一次性走过头
+                    # step_factor = 1 / (1 + k * gap)，k 控制衰减速度
+                    k = 2.0  # 衰减系数，k 越大衰减越快
+                    step_factor = 1.0 / (1.0 + k * dist_diff)
+                    step_factor = max(0.1, min(1.0, step_factor))  # 限制在 [0.1, 1.0]
+                    move_distance = dist_diff * step_factor
                     direction = "FORWARD" if distance > self.target_distance else "BACKWARD"
-                    self.current_control_cmd = f"{direction} {dist_diff:.2f}m"
+                    self.current_control_cmd = f"{direction} {move_distance:.2f}m (factor={step_factor:.2f})"
                 else:
                     self.current_control_cmd = "IN_POSITION"
             else:

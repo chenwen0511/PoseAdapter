@@ -524,17 +524,30 @@ class MotionController(Node):
         
         if distance_error > 0:
             move_dist = distance_error
+            # 平滑衰减：距离越远，步长系数越小，避免一次性走过头
+            # step_factor = 1 / (1 + k * gap)，k 控制衰减速度
+            k = 2.0  # 衰减系数
+            step_factor = 1.0 / (1.0 + k * abs(distance_error))
+            step_factor = max(0.1, min(1.0, step_factor))  # 限制在 [0.1, 1.0]
+            move_dist = move_dist * step_factor
+            # 再限制最大步长
             if move_dist > self.step_distance:
                 move_dist = self.step_distance
-            self.get_logger().info(f"[精确控制] 前进 {move_dist*100:.1f}cm")
+            self.get_logger().info(f"[精确控制] 前进 {move_dist*100:.1f}cm (factor={step_factor:.2f})")
             self.move_forward_distance(move_dist, timeout=5.0)
             self.is_positioned = False
             return None
         else:
             move_dist = distance_error
+            # 平滑衰减
+            k = 2.0
+            step_factor = 1.0 / (1.0 + k * abs(distance_error))
+            step_factor = max(0.1, min(1.0, step_factor))
+            move_dist = move_dist * step_factor
+            # 再限制最大步长
             if abs(move_dist) > self.step_distance:
                 move_dist = -self.step_distance
-            self.get_logger().info(f"[精确控制] 后退 {abs(move_dist)*100:.1f}cm")
+            self.get_logger().info(f"[精确控制] 后退 {abs(move_dist)*100:.1f}cm (factor={step_factor:.2f})")
             self.move_forward_distance(move_dist, timeout=5.0)
             self.is_positioned = False
             return None
