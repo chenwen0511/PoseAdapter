@@ -10,6 +10,8 @@ shift || true
 PID_FILE="$SCRIPT_DIR/data/logs/pose_adapter.pid"
 LOG_DIR="$SCRIPT_DIR/data/logs"
 LOG_FILE="$LOG_DIR/pose_adapter.log"
+# 默认 start/restart 成功后在本终端 tail -f 日志；自动化启动设 POSE_ADAPTER_NO_TAIL=1 可跳过
+POSE_ADAPTER_NO_TAIL="${POSE_ADAPTER_NO_TAIL:-0}"
 DEFAULT_CALIB_FILE="$SCRIPT_DIR/src/calibrate/calibration_results/rtsp_camera_calib.yaml"
 CALIB_FILE="${CALIB_FILE:-$DEFAULT_CALIB_FILE}"
 DEFAULT_MODEL_FILE="$SCRIPT_DIR/model/best.pt"
@@ -172,7 +174,7 @@ ensure_model_file() {
 start_service() {
   if is_running; then
     echo "pose_adapter 已在运行 (pid=$(cat "$PID_FILE"))"
-    exit 0
+    return 0
   fi
 
   cleanup_stale_processes
@@ -269,9 +271,22 @@ show_logs() {
   tail -n 100 -f "$LOG_FILE"
 }
 
+# start/restart 成功后默认跟踪日志（与 data/logs/pose_adapter.log 一致，见 LOG_FILE）
+tail_log_default() {
+  if [ "$POSE_ADAPTER_NO_TAIL" = "1" ]; then
+    return 0
+  fi
+  touch "$LOG_FILE"
+  echo "----------------------------------------"
+  echo "跟踪日志 (Ctrl+C 仅结束 tail，节点继续运行): $LOG_FILE"
+  echo "----------------------------------------"
+  tail -f "$LOG_FILE"
+}
+
 case "$ACTION" in
   start)
     start_service
+    tail_log_default
     ;;
   stop)
     stop_service
@@ -279,6 +294,7 @@ case "$ACTION" in
   restart)
     stop_service || true
     start_service
+    tail_log_default
     ;;
   status)
     status_service
@@ -288,6 +304,7 @@ case "$ACTION" in
     ;;
   *)
     echo "用法: $0 {start|stop|restart|status|logs} [ros2 launch 额外参数]"
+    echo "环境变量: POSE_ADAPTER_NO_TAIL=1 时 start/restart 不自动 tail -f 日志"
     exit 1
     ;;
 esac
