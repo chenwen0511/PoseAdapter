@@ -1,2 +1,4 @@
 PyYAML
-numpy
+# PyTorch / onnxruntime / ultralytics 的多数 wheel 仍按 NumPy 1.x ABI 构建，NumPy 2.x 会导致
+# "_ARRAY_API not found" / "Numpy is not available"。保持 1.26+（Py3.10）且 <2。
+numpy>=1.26.0,<2

@@ -759,14 +759,25 @@ class PoseAdapterNode(Node):
         self.get_logger().info(f"选择目标 ID: {best_track}")
         return best_track
 
-    def _trigger_ocr(self, bbox):
-        """触发 OCR"""
+    def _trigger_ocr(self, bbox, cv_image):
+        """到位后对电表 bbox ROI 执行读数识别（MeterOCR.recognize）。"""
         if self.ocr_result is not None:
             return
-
+        if cv_image is None or cv_image.size == 0:
+            self.get_logger().warn("[OCR] 无有效图像，跳过")
+            return
+        x1, y1, x2, y2 = [int(round(v)) for v in bbox]
+        ih, iw = cv_image.shape[:2]
+        x1, x2 = max(0, x1), min(iw, x2)
+        y1, y2 = max(0, y1), min(ih, y2)
+        if x2 <= x1 or y2 <= y1:
+            self.get_logger().warn("[OCR] bbox ROI 无效，跳过")
+            return
+        roi = cv_image[y1:y2, x1:x2]
         if self.ocr is None:
             self.ocr = MeterOCR(use_paddle=self.use_paddle_ocr, logger=self.get_logger())
         self.get_logger().info("触发 OCR 识别...")
+        self.ocr_result = self.ocr.recognize(roi)
 
     def _add_debug_overlay(self, debug_image):
         """发布调试图像（带完整可视化）"""
@@ -1073,7 +1084,7 @@ class PoseAdapterNode(Node):
 
             # OCR
             if self.controller.is_ready_for_ocr():
-                self._trigger_ocr(bbox)
+                self._trigger_ocr(bbox, cv_image)
 
             # 绘制 overlay（在 PnP 和控制计算完成后）
             if len(self.current_detections) > 0:

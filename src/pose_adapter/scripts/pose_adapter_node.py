@@ -376,6 +376,10 @@ class PoseAdapterNode:
         """控制循环"""
         if not self.is_running or self.target_track_id is None:
             return
+
+        cv_image = self._get_image()
+        if cv_image is None:
+            return
         
         # 查找目标追踪
         target_track = None
@@ -427,16 +431,27 @@ class PoseAdapterNode:
         
         # 检查是否到位
         if self.controller.is_ready_for_ocr():
-            self._trigger_ocr(bbox)
+            self._trigger_ocr(bbox, cv_image)
     
-    def _trigger_ocr(self, bbox):
-        """触发 OCR"""
+    def _trigger_ocr(self, bbox, cv_image):
+        """到位后对电表 bbox ROI 执行读数识别。"""
         if self.ocr_result is not None:
             return
-
+        if cv_image is None or cv_image.size == 0:
+            rospy.logwarn("[OCR] 无有效图像，跳过")
+            return
+        x1, y1, x2, y2 = [int(round(v)) for v in bbox]
+        ih, iw = cv_image.shape[:2]
+        x1, x2 = max(0, x1), min(iw, x2)
+        y1, y2 = max(0, y1), min(ih, y2)
+        if x2 <= x1 or y2 <= y1:
+            rospy.logwarn("[OCR] bbox ROI 无效，跳过")
+            return
+        roi = cv_image[y1:y2, x1:x2]
         if self.ocr is None:
-            self.ocr = MeterOCR(use_paddle=self.use_paddle_ocr)
+            self.ocr = MeterOCR(use_paddle=self.use_paddle_ocr, logger=rospy)
         rospy.loginfo("触发 OCR 识别...")
+        self.ocr_result = self.ocr.recognize(roi)
     
     def _publish_debug_image(self, cv_image):
         """发布调试图像"""
@@ -650,7 +665,7 @@ class PoseAdapterNode:
             
             # 检查是否到位，准备OCR
             if self.controller.is_ready_for_ocr():
-                self._trigger_ocr(bbox)
+                self._trigger_ocr(bbox, cv_image)
         else:
             rospy.loginfo_throttle(2.0, "[Pipeline] 无目标，保持静止")
             self.controller.stop()
