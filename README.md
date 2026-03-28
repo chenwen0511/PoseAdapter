@@ -26,7 +26,9 @@ PoseAdapter/
         │   ├── detector.py     # 目标检测（YOLOv8）
         │   ├── tracker.py      # 目标追踪（DeepSORT）
         │   ├── pose_solver.py  # PnP 位姿解算
-        │   ├── controller.py   # 运动控制（ZSI-1/Go2 SDK）
+        │   ├── controller_base.py # 运动控制抽象基类
+        │   ├── controller_go2.py  # Go2 控制实现
+        │   ├── controller_zsi1.py # ZSI-1 控制实现
         │   ├── ocr.py          # 电表 OCR
         │   └── pose_adapter_node.py  # 主节点
         ├── launch/        # Launch 文件
@@ -90,7 +92,7 @@ colcon build --packages-select pose_adapter
 
 ---
 
-## 运行模式确认（ZSI-1 / GO2 / cmd_vel）
+## 运行模式确认（ZSI-1 / GO2）
 
 启动后请先看日志里的 `body_type` 与控制模式，判断是否走到预期 SDK：
 
@@ -201,7 +203,61 @@ python3.10 tests/test_pipeline.py
 
 ---
 
+## 控制器架构
+
+本项目使用**抽象基类**设计，支持不同机型：
+
+### 模块说明
+
+| 文件 | 说明 |
+|------|------|
+| `controller_base.py` | 抽象基类 `BaseMotionController`，定义公共接口 |
+| `controller_go2.py` | Go2 实现，通过 Unitree SDK high_level 接口控制 |
+| `controller_zsi1.py` | ZSI-1 实现，通过 zsibot_sdk 控制 |
+
+### 抽象接口
+
+```python
+class BaseMotionController(ABC):
+    def initialize(self):           # 初始化 SDK
+    def move_forward_distance(distance_m, timeout):  # 前进/后退
+    def turn_angle(angle_deg, timeout):  # 转向
+    def stop():                     # 停止运动
+    def stand_up():                 # 站立
+    def stand_down():               # 趴下
+    def compute_control(pose, bbox_ratio, center_offset):  # 计算控制指令
+    def get_status():              # 获取状态
+```
+
+### 使用示例
+
+```python
+# Go2
+from controller_go2 import Go2MotionController
+ctrl = Go2MotionController()
+
+# ZSI-1
+from controller_zsi1 import ZSI1MotionController
+ctrl = ZSI1MotionController()
+```
+
+### 选择控制器
+
+- **Go2**: 设置 `BODY=GO2` 或 `use_high_level_sdk=True`
+- **ZSI-1**: 设置 `BODY=ZSI-1`
+
+---
+
 ## 更新日志
+
+### 2026-03-28
+
+**控制器重构**
+
+- 提取抽象基类 `BaseMotionController`
+- 新增 `controller_go2.py` (Go2 SDK 实现)
+- 新增 `controller_zsi1.py` (ZSI SDK 实现)
+- 移除 cmd_vel 模式，仅支持 SDK 控制
 
 ### 2025-03-25
 
