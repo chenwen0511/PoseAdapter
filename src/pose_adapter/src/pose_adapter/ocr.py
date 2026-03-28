@@ -129,7 +129,7 @@ class MeterOCR:
             try:
                 from paddleocr import PaddleOCR
 
-                self.ocr_engine = PaddleOCR(use_angle_cls=True, lang="en", show_log=False)
+                self.ocr_engine = PaddleOCR(use_angle_cls=True, lang="en")
                 loginfo("PaddleOCR 初始化成功")
             except ImportError:
                 logwarn("PaddleOCR 未安装，使用备用方案")
