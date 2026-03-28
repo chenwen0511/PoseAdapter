@@ -185,10 +185,14 @@ class K40TMotionController(Node, BaseMotionController):
         return True
     
     def turn_angle(self, angle_deg, timeout=10.0):
-        """旋转 → 云台左右转动
+        """旋转 → 云台左右转动 + 俯仰转动
         
         angle_deg > 0: 左转
         angle_deg < 0: 右转
+        
+        可选 pitch_offset 控制上下转动:
+        pitch_offset > 0: 目标偏下，需要向上看
+        pitch_offset < 0: 目标偏上，需要向下看
         """
         direction = "左转" if angle_deg > 0 else "右转"
         self.get_logger().info(f"[K40T] {direction} {abs(angle_deg):.1f}度")
@@ -199,6 +203,28 @@ class K40TMotionController(Node, BaseMotionController):
         self.move(yaw_dir, 2)  # 水平转动
         
         duration = abs(angle_deg) / 30  # 估计时间
+        duration = min(duration, timeout)
+        
+        self._sleep(duration)
+        self.stop()
+        
+        return True
+    
+    def adjust_pitch(self, pitch_offset: float, timeout=10.0):
+        """调整俯仰角
+        
+        pitch_offset > 0: 目标偏下，向上看
+        pitch_offset < 0: 目标偏上，向下看
+        """
+        direction = "上转" if pitch_offset > 0 else "下转"
+        self.get_logger().info(f"[K40T] {direction} {abs(pitch_offset):.1f}度")
+        
+        # 使用方向控制
+        pitch_dir = 1 if pitch_offset > 0 else 0
+        self.set_speed(15, 15)
+        self.move(2, pitch_dir)  # 垂直转动
+        
+        duration = abs(pitch_offset) / 30
         duration = min(duration, timeout)
         
         self._sleep(duration)
