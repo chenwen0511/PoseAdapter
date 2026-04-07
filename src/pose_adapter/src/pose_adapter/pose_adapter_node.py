@@ -413,30 +413,25 @@ class PoseAdapterNode(Node):
                 self.get_logger().warn("[RTMP] ffmpeg 未安装，无法推流")
                 return
 
-            # 使用 ffmpeg 推流
+            # 使用 ffmpeg 推流 - 改为 NVIDIA 硬件编码
             cmd = [
                 'ffmpeg',
                 '-f', 'rawvideo',
                 '-pix_fmt', 'bgr24',
                 '-s', f'{self.camera_width}x{self.camera_height}',
-                '-r', '10',
+                '-r', '15',
                 '-i', '-',
                 '-an',
-                '-c:v', 'libx264',
-                # 雪花屏常见原因之一是编码输出格式/档位不兼容（例如 yuv444p + High）。
-                # 这里强制输出 yuv420p + baseline，并关掉 B 帧，且定期插入关键帧头信息，提升播放器兼容性。
+                '-c:v', 'h264_nvenc',      # NVIDIA 硬件编码
+                '-preset', 'lllow',       # 低延迟预设
+                '-tune', 'zerolatency',
+                '-b:v', '2000k',         # 码率
+                '-rc', 'cbr',             # 恒定码率
                 '-pix_fmt', 'yuv420p',
-                '-profile:v', 'baseline',
-                '-level', '3.1',
-                # 关键帧越频繁，播放器越容易快速"对齐"解码（减少雪花/黑屏）。
-                '-g', '10',
-                '-keyint_min', '10',
+                '-g', '30',
+                '-keyint_min', '15',
                 '-sc_threshold', '0',
                 '-bf', '0',
-                '-preset', 'ultrafast',
-                '-tune', 'zerolatency',
-                '-b', '1000k',
-                '-x264-params', 'repeat-headers=1',
                 '-f', 'flv',
                 rtmp_url
             ]
