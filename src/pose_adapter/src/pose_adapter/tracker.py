@@ -13,11 +13,12 @@ class Track:
     
     _id_counter = 0
     
-    def __init__(self, bbox, conf):
+    def __init__(self, bbox, conf, keypoints=None):
         Track._id_counter += 1
         self.id = Track._id_counter
         self.bbox = bbox
         self.conf = conf
+        self.keypoints = keypoints  # 保存关键点
         self.age = 0
         self.hits = 1
         self.time_since_update = 0
@@ -40,7 +41,7 @@ class Track:
         self.time_since_update += 1
         return self
     
-    def update(self, bbox, conf):
+    def update(self, bbox, conf, keypoints=None):
         """更新追踪目标"""
         x1, y1, x2, y2 = bbox
         cx, cy = (x1 + x2) / 2, (y1 + y2) / 2
@@ -54,6 +55,7 @@ class Track:
         
         self.bbox = bbox
         self.conf = conf
+        self.keypoints = keypoints  # 更新关键点
         self.hits += 1
         self.time_since_update = 0
         self.history.append(bbox)
@@ -106,7 +108,8 @@ class DeepSORTTracker:
         # 更新已匹配
         for det_idx, track_idx in matched:
             det = detections[det_idx]
-            self.tracks[track_idx].update(det[:4], det[4])
+            keypoints = det[6] if len(det) > 6 else None  # 提取关键点
+            self.tracks[track_idx].update(det[:4], det[4], keypoints)
         
         # 删除丢失跟踪
         self.tracks = [t for t in self.tracks if t.time_since_update <= self.max_age]
@@ -114,13 +117,15 @@ class DeepSORTTracker:
         # 添加新跟踪
         for det_idx in unmatched_dets:
             det = detections[det_idx]
-            self.tracks.append(Track(det[:4], det[4]))
+            keypoints = det[6] if len(det) > 6 else None
+            self.tracks.append(Track(det[:4], det[4], keypoints))
         
         # 返回活跃跟踪
         result = []
         for track in self.tracks:
             if track.time_since_update == 0 and track.hits >= self.min_hits:
-                result.append((track.id, track.bbox, track.conf))
+                # 返回格式: (track_id, bbox, conf, keypoints)
+                result.append((track.id, track.bbox, track.conf, track.keypoints))
         
         return result
     

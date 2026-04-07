@@ -811,7 +811,12 @@ class PoseAdapterNode(Node):
                        cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 255, 0), 2)
 
         # ========== 3. 追踪框 ==========
-        for track_id, bbox, conf in self.current_tracks:
+        for track in self.current_tracks:
+            # 新格式: (track_id, bbox, conf, keypoints)
+            if len(track) >= 4:
+                track_id, bbox, conf, _ = track[:4]
+            else:
+                track_id, bbox, conf = track[:3]
             x1, y1, x2, y2 = bbox
             color = (0, 0, 255) if track_id == self.target_track_id else (255, 0, 0)
             cv2.rectangle(debug_image, (x1, y1), (x2, y2), color, 2)
@@ -908,7 +913,14 @@ class PoseAdapterNode(Node):
         h, w = self.image_shape
         valid_detections = []
         for det in detections:
-            x1, y1, x2, y2, conf, cls = det
+            # 支持两种格式:
+            # 1. (x1, y1, x2, y2, conf, cls) - 无关键点
+            # 2. (x1, y1, x2, y2, conf, cls, keypoints) - 带关键点
+            if len(det) >= 6:
+                x1, y1, x2, y2, conf, cls = det[:6]
+                keypoints = det[6] if len(det) > 6 and det[6] is not None else None
+            else:
+                continue
             bw = max(0, x2 - x1)
             bh = max(0, y2 - y1)
             if bw == 0 or bh == 0:
@@ -917,7 +929,8 @@ class PoseAdapterNode(Node):
             if area_ratio >= 0.9:
                 self.get_logger().warn(f"[Pipeline] 检测框过大({area_ratio:.2f})，丢弃")
                 continue
-            valid_detections.append(det)
+            # 将关键点也传入 detection
+            valid_detections.append((x1, y1, x2, y2, conf, cls, keypoints))
 
         self.current_detections = valid_detections
 
@@ -965,9 +978,13 @@ class PoseAdapterNode(Node):
         # 4. PnP位姿解算 + 5. 控制 + 绘制 overlay
         if self.target_track_id is not None:
             target_track = None
-            for track_id, bbox, conf in self.current_tracks:
+            for track in self.current_tracks:
+                if len(track) >= 4:
+                    track_id, bbox, conf, _ = track[:4]
+                else:
+                    track_id, bbox, conf = track[:3]
                 if track_id == self.target_track_id:
-                    target_track = (track_id, bbox, conf)
+                    target_track = track
                     break
 
             if target_track is None:
@@ -987,8 +1004,24 @@ class PoseAdapterNode(Node):
                     self.get_logger().warn(f"[Pipeline] 目标框过大({area_ratio:.2f})")
                     return
 
-            # PnP
-            keypoints = self.detector.extract_corners(cv_image, bbox)
+            # PnP - 传递关键点
+            # 从追踪结果获取 keypoints
+            track = self.current_tracks[self.track_index]
+            # track 可能是 tuple 或 Track 对象
+            if hasattr(track, 'keypoints'):
+                keypoints = track.keypoints
+                bbox = track.bbox if hasattr(track, 'bbox') else track[:4]
+            else:
+                # 兼容旧格式
+                x1, y1, x2, y2, conf, cls = track[:6]
+                keypoints = track[6] if len(track) > 6 else None
+                bbox = (int(x1), int(y1), int(x2), int(y2))
+            
+            # 使用模型输出的关键点或从图像计算
+            if keypoints and len(keypoints) >= 4:
+                corners = self.detector.extract_corners(cv_image, bbox=bbox, keypoints=keypoints)
+            else:
+                corners = self.detector.extract_corners(cv_image, bbox=bbox)
             # 保存关键点用于可视化
             self.current_keypoints = keypoints
             # 获取边缘检测结果

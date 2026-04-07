@@ -2,6 +2,7 @@
 # -*- coding: utf-8 -*-
 """
 电表检测器 - 基于 YOLOv8 的目标检测 (ROS2 版本)
+支持 YOLO Pose 格式模型 (bbox + keypoints)
 """
 
 import cv2
@@ -35,13 +36,17 @@ def _logdebug(msg, logger):
 class MeterDetector:
     """电表检测器类"""
     
-    def __init__(self, model_path=None, conf_threshold=0.5, iou_threshold=0.45, min_area_ratio=0.05, use_gpu=True, keypoint_method='bbox', logger=None):
+    def __init__(self, model_path=None, conf_threshold=0.5, iou_threshold=0.45, min_area_ratio=0.05, use_gpu=True, keypoint_method='yolo', logger=None):
         self.conf_threshold = conf_threshold
         self.iou_threshold = iou_threshold
         self.min_area_ratio = float(min_area_ratio) if min_area_ratio is not None else 0.05
         self.use_gpu = use_gpu
         self.keypoint_method = keypoint_method
         self.logger = logger
+        
+        # 关键点配置: 4个点, 3维(x, y, visible)
+        self.num_keypoints = 4
+        self.keypoint_dim = 3
         
         _loginfo(f"[Detector] 关键点提取方式: {keypoint_method}", logger)
         
@@ -50,6 +55,7 @@ class MeterDetector:
         
         self.model = None
         self.use_yolo = False
+        self.use_yolo_pose = False  # 是否使用 YOLO Pose 模型
         self._device = 'cpu'
         
         if model_path and str(model_path).strip():
@@ -69,9 +75,26 @@ class MeterDetector:
                         _logwarn("PyTorch 未安装，使用 CPU", logger)
                 
                 self.use_yolo = True
+                
+                # 检查模型是否是 YOLO Pose 格式（带关键点）
+                try:
+                    # 获取模型的 task 类型
+                    model_info = self.model.info(verbose=False)[0]
+                    task_type = model_info.task if hasattr(model_info, 'task') else 'detect'
+                    _loginfo(f"[Detector] 模型类型: {task_type}", logger)
+                    
+                    # 检查是否支持关键点
+                    if hasattr(self.model, 'keypoint_map') or task_type == 'pose':
+                        self.use_yolo_pose = True
+                        _loginfo("[Detector] YOLO Pose 模型加载成功，支持关键点检测", logger)
+                    else:
+                        _logwarn("[Detector] 模型不支持关键点，将使用备用方法提取角点", logger)
+                except Exception as e:
+                    _logwarn(f"[Detector] 无法判断模型类型: {e}", logger)
+                
                 _loginfo(f"YOLOv8 模型加载成功: {model_path}, 设备: {self._device}", logger)
             except ImportError as e:
-                _logwarn(f"ultralytics 导入失败（将使用备用检测）: {e}", logger)
+                _logwarn(f"ultralytics 导入��败（将使用备用检测）: {e}", logger)
             except Exception as e:
                 _logwarn(f"YOLO 模型加载失败: {e}", logger)
         
@@ -105,19 +128,59 @@ class MeterDetector:
         return detections
     
     def _detect_yolo(self, cv_image):
-        """使用 YOLOv8 检测"""
+        """使用 YOLOv8 检测 (支持 Pose 格式)"""
         results = self.model(cv_image, verbose=False, device=self._device, half=False)
         detections = []
         
         for result in results:
-            boxes = result.boxes
-            for box in boxes:
-                x1, y1, x2, y2 = box.xyxy[0].cpu().numpy()
-                conf = box.conf[0].cpu().numpy()
-                cls = int(box.cls[0].cpu().numpy())
+            # 检查是否是 YOLO Pose 模型
+            if self.use_yolo_pose and result.keypoints is not None:
+                # 使用 YOLO Pose 格式: bbox + keypoints
+                keypoints = result.keypoints  # Keypoints 对象
                 
-                if conf >= self.conf_threshold:
-                    detections.append((int(x1), int(y1), int(x2), int(y2), float(conf), cls))
+                if keypoints.has_visible:
+                    # 遍历每个检测结果
+                    boxes = result.boxes
+                    for i, box in enumerate(boxes):
+                        x1, y1, x2, y2 = box.xyxy[0].cpu().numpy()
+                        conf = box.conf[0].cpu().numpy()
+                        cls = int(box.cls[0].cpu().numpy())
+                        
+                        if conf >= self.conf_threshold:
+                            # 提取关键点
+                            kpts = []
+                            try:
+                                # keypoints.data shape: [N, num_keypoints, 3] (x, y, visibility)
+                                kp_data = keypoints.data[i].cpu().numpy()
+                                for j in range(min(self.num_keypoints, len(kp_data))):
+                                    kp = kp_data[j]
+                                    # 如果 visibility > 0.5 则认为可见
+                                    visible = 1 if kp[2] > 0.5 else 0
+                                    kpts.append([int(kp[0]), int(kp[1]), visible])
+                            except Exception as e:
+                                _logwarn(f"[Detector] 提取关键点失败: {e}", self.logger)
+                                kpts = []
+                            
+                            # 返回包含关键点的检测结果
+                            # 格式: (x1, y1, x2, y2, conf, cls, keypoints)
+                            detections.append((
+                                int(x1), int(y1), int(x2), int(y2),
+                                float(conf), cls, kpts
+                            ))
+                else:
+                    _logwarn("[Detector] Pose 模型无可见关键点数据", self.logger)
+            
+            # 标准的 YOLO 检测 (不带关键点)
+            if not self.use_yolo_pose or not detections:
+                boxes = result.boxes
+                for box in boxes:
+                    x1, y1, x2, y2 = box.xyxy[0].cpu().numpy()
+                    conf = box.conf[0].cpu().numpy()
+                    cls = int(box.cls[0].cpu().numpy())
+                    
+                    if conf >= self.conf_threshold:
+                        # 返回标准检测结果 (无关键点)
+                        detections.append((int(x1), int(y1), int(x2), int(y2), float(conf), cls, None))
         
         return detections
     
@@ -175,15 +238,56 @@ class MeterDetector:
         y2 = min(h, y2 + margin)
         return cv_image[y1:y2, x1:x2]
     
-    def extract_corners(self, cv_image, bbox):
-        """提取电表角点"""
-        if self.keypoint_method == 'bbox':
+    def extract_corners(self, cv_image, bbox=None, keypoints=None):
+        """提取电表角点
+        Args:
+            cv_image: 输入图像
+            bbox: 检测框 (x1, y1, x2, y2)，可选
+            keypoints: 模型输出的关键点列表，可选
+                     格式: [[x, y, visible], ...]
+        Returns:
+            四边形四个角点: [[x, y], [x, y], [x, y], [x, y]]
+        """
+        # 优先使用模型输出的关键点
+        if keypoints and len(keypoints) >= 4:
+            return self._get_model_keypoints(keypoints)
+        
+        # 使用 bbox 或 fallback 方法
+        if self.keypoint_method == 'yolo' and bbox is not None:
+            # 尝试从 YOLO 结果中获取
             return self._get_bbox_corners(bbox)
-        elif self.keypoint_method == 'contour':
+        elif self.keypoint_method == 'bbox' and bbox is not None:
+            return self._get_bbox_corners(bbox)
+        elif self.keypoint_method == 'contour' and cv_image is not None and bbox is not None:
             return self._extract_contour_corners(cv_image, bbox)
         else:
-            _logwarn(f"[Detector] 未知 keypoint_method: {self.keypoint_method}，使用 bbox", self.logger)
-            return self._get_bbox_corners(bbox)
+            if bbox:
+                return self._get_bbox_corners(bbox)
+            else:
+                _logwarn("[Detector] 无法提取角点，缺少 bbox", self.logger)
+                return []
+    
+    def _get_model_keypoints(self, keypoints):
+        """从模型输出获取关键点
+        Args:
+            keypoints: [[x, y, visible], ...]
+        Returns:
+            [[x, y], [x, y], [x, y], [x, y]] (左上, 右上, 右下, 左下)
+        """
+        if not keypoints or len(keypoints) < 4:
+            return []
+        
+        # 确保顺序正确: 左上, 右上, 右下, 左下
+        # 假设模型输出顺序是 TL, TR, BR, BL
+        corners = []
+        for kp in keypoints[:4]:
+            if len(kp) >= 2:
+                corners.append([int(kp[0]), int(kp[1])])
+        
+        if len(corners) < 4:
+            return []
+        
+        return corners
     
     def _get_bbox_corners(self, bbox):
         x1, y1, x2, y2 = bbox
