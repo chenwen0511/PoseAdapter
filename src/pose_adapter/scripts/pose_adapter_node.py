@@ -358,7 +358,8 @@ class PoseAdapterNode:
         best_track = None
         min_offset = float('inf')
         
-        for track_id, bbox, conf in tracks:
+        for tr in tracks:
+            track_id, bbox, conf = tr[0], tr[1], tr[2]
             cx = (bbox[0] + bbox[2]) / 2
             cy = (bbox[1] + bbox[3]) / 2
             image_cx = self.camera_width / 2
@@ -383,9 +384,9 @@ class PoseAdapterNode:
         
         # 查找目标追踪
         target_track = None
-        for track_id, bbox, conf in self.current_tracks:
-            if track_id == self.target_track_id:
-                target_track = (track_id, bbox, conf)
+        for tr in self.current_tracks:
+            if tr[0] == self.target_track_id:
+                target_track = tr
                 break
         
         if target_track is None:
@@ -394,7 +395,7 @@ class PoseAdapterNode:
             # 不调用 controller.stop()，避免频繁 StopMove 导致原地抖；仅清空目标，下一帧重新选目标后再发 Move
             return
         
-        _, bbox, conf = target_track
+        _, bbox, conf = target_track[0], target_track[1], target_track[2]
 
         # 若当前 bbox 明显异常（几乎占满整幅图像），则跳过控制，避免 PnP 得到不合理位姿
         h, w = self.image_shape if self.image_shape is not None else (0, 0)
@@ -464,7 +465,8 @@ class PoseAdapterNode:
                        cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 255, 0), 2)
         
         # 绘制追踪框
-        for track_id, bbox, conf in self.current_tracks:
+        for tr in self.current_tracks:
+            track_id, bbox, conf = tr[0], tr[1], tr[2]
             x1, y1, x2, y2 = bbox
             color = (0, 0, 255) if track_id == self.target_track_id else (255, 0, 0)
             cv2.rectangle(debug_image, (x1, y1), (x2, y2), color, 2)
@@ -473,7 +475,8 @@ class PoseAdapterNode:
         
         # 若已选中目标，在 debug 图中高亮 PnP 使用的四个角点，便于核对电表读数区域
         if self.target_track_id is not None:
-            for track_id, bbox, conf in self.current_tracks:
+            for tr in self.current_tracks:
+                track_id, bbox, conf = tr[0], tr[1], tr[2]
                 if track_id == self.target_track_id:
                     x1, y1, x2, y2 = bbox
                     # 顺序与 PoseSolver 中的 image_points 保持一致：
@@ -605,9 +608,9 @@ class PoseAdapterNode:
         if self.target_track_id is not None:
             # 查找目标追踪
             target_track = None
-            for track_id, bbox, conf in self.current_tracks:
-                if track_id == self.target_track_id:
-                    target_track = (track_id, bbox, conf)
+            for tr in self.current_tracks:
+                if tr[0] == self.target_track_id:
+                    target_track = tr
                     break
             
             if target_track is None:
@@ -617,7 +620,7 @@ class PoseAdapterNode:
                 rospy.sleep(0.5)
                 return
             
-            _, bbox, conf = target_track
+            _, bbox, conf = target_track[0], target_track[1], target_track[2]
             
             # 检查bbox是否异常
             x1, y1, x2, y2 = bbox

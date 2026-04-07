@@ -740,7 +740,8 @@ class PoseAdapterNode(Node):
         best_track = None
         min_offset = float('inf')
 
-        for track_id, bbox, conf in tracks:
+        for tr in tracks:
+            track_id, bbox, conf = tr[0], tr[1], tr[2]
             cx = (bbox[0] + bbox[2]) / 2
             cy = (bbox[1] + bbox[3]) / 2
             image_cx = self.camera_width / 2
@@ -811,7 +812,8 @@ class PoseAdapterNode(Node):
                        cv2.FONT_HERSHEY_SIMPLEX, 0.4, (0, 255, 255), 1)
 
         # ========== 2. YOLO 检测框 ==========
-        for x1, y1, x2, y2, conf, cls in self.current_detections:
+        for det in self.current_detections:
+            x1, y1, x2, y2, conf, cls = det[:6]
             cv2.rectangle(debug_image, (x1, y1), (x2, y2), (0, 255, 0), 2)
             cv2.putText(debug_image, f"YOLO:{conf:.2f}", (x1, y1-10),
                        cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 255, 0), 2)
@@ -998,7 +1000,8 @@ class PoseAdapterNode(Node):
                 self.target_track_id = None
                 return
 
-            _, bbox, conf = target_track
+            _, bbox, conf = target_track[0], target_track[1], target_track[2]
+            track_kpts = target_track[3] if len(target_track) > 3 else None
 
             # 检查bbox异常
             x1, y1, x2, y2 = bbox
@@ -1010,22 +1013,14 @@ class PoseAdapterNode(Node):
                     self.get_logger().warn(f"[Pipeline] 目标框过大({area_ratio:.2f})")
                     return
 
-            # PnP - 传递关键点
-            # 从追踪结果获取 keypoints
-            track = self.current_tracks[self.track_index]
-            # track 可能是 tuple 或 Track 对象
-            if hasattr(track, 'keypoints'):
-                keypoints = track.keypoints
-                bbox = track.bbox if hasattr(track, 'bbox') else track[:4]
-            else:
-                # 兼容旧格式
-                x1, y1, x2, y2, conf, cls = track[:6]
-                keypoints = track[6] if len(track) > 6 else None
-                bbox = (int(x1), int(y1), int(x2), int(y2))
+            # PnP - 传递关键点（优先使用目标追踪内携带的 keypoints）
+            keypoints = track_kpts
             
             # 使用模型输出的关键点或从图像计算
             if keypoints and len(keypoints) >= 4:
-                corners = self.detector.extract_corners(cv_image, bbox=bbox, keypoints=keypoints)
+                corners = self.detector.extract_corners(
+                    cv_image, bbox=bbox, keypoints=keypoints
+                )
             else:
                 corners = self.detector.extract_corners(cv_image, bbox=bbox)
             # 保存关键点用于可视化
