@@ -413,33 +413,74 @@ class PoseAdapterNode(Node):
                 self.get_logger().warn("[RTMP] ffmpeg 未安装，无法推流")
                 return
 
-            # 使用 ffmpeg 推流 - 改为 NVIDIA 硬件编码
-            cmd = [
+            # 使用 ffmpeg 推流
+            # 注意：Jetson 常见的 ffmpeg 4.4.2 可能不支持 h264_nvenc 的部分参数（例如 -rc），
+            # 这里优先走 NVENC，失败时自动回退到 libx264，确保一定可推流。
+            common_in = [
                 'ffmpeg',
+                '-hide_banner',
+                '-loglevel', 'warning',
                 '-f', 'rawvideo',
                 '-pix_fmt', 'bgr24',
                 '-s', f'{self.camera_width}x{self.camera_height}',
                 '-r', '15',
                 '-i', '-',
                 '-an',
-                '-c:v', 'h264_nvenc',      # NVIDIA 硬件编码
-                '-preset', 'lllow',       # 低延迟预设
+            ]
+
+            # 更通用的“近似 CBR”写法：-b:v + -maxrate + -bufsize
+            rate_ctl = [
+                '-b:v', '2000k',
+                '-maxrate', '2000k',
+                '-bufsize', '4000k',
+            ]
+
+            nvenc_out = [
+                '-c:v', 'h264_nvenc',
+                '-preset', 'll',           # 比 lllow 更兼容
                 '-tune', 'zerolatency',
-                '-b:v', '2000k',         # 码率
-                '-rc', 'cbr',             # 恒定码率
+                *rate_ctl,
                 '-pix_fmt', 'yuv420p',
                 '-g', '30',
                 '-keyint_min', '15',
                 '-sc_threshold', '0',
                 '-bf', '0',
                 '-f', 'flv',
-                rtmp_url
+                rtmp_url,
             ]
+
+            x264_out = [
+                '-c:v', 'libx264',
+                '-preset', 'veryfast',
+                '-tune', 'zerolatency',
+                *rate_ctl,
+                '-pix_fmt', 'yuv420p',
+                '-g', '30',
+                '-keyint_min', '15',
+                '-sc_threshold', '0',
+                '-bf', '0',
+                '-f', 'flv',
+                rtmp_url,
+            ]
+
+            # 探测 encoder 是否存在（避免一启动就失败导致频繁 Broken pipe）
+            has_nvenc = (subprocess.run(
+                ['ffmpeg', '-hide_banner', '-encoders'],
+                capture_output=True,
+                text=True
+            ).returncode == 0) and ('h264_nvenc' in (subprocess.run(
+                ['ffmpeg', '-hide_banner', '-encoders'],
+                capture_output=True,
+                text=True
+            ).stdout or ''))
+
+            cmd = common_in + (nvenc_out if has_nvenc else x264_out)
 
             # 关键：不要吞掉 ffmpeg 的 stderr，便于定位 RTMP 是否连接成功/是否鉴权失败。
             log_dir = os.path.join(os.getcwd(), 'data', 'logs')
             os.makedirs(log_dir, exist_ok=True)
             rtmp_ffmpeg_log_path = os.path.join(log_dir, 'pose_adapter_rtmp_ffmpeg.log')
+            self._rtmp_ffmpeg_log_path = rtmp_ffmpeg_log_path
             self._rtmp_ffmpeg_log_fp = open(rtmp_ffmpeg_log_path, 'a', buffering=1)
 
             self.rtmp_process = subprocess.Popen(
@@ -450,6 +491,68 @@ class PoseAdapterNode(Node):
             self.get_logger().info(f"RTMP 推流已启动: {rtmp_url}")
         except Exception as e:
             self.get_logger().warn(f"RTMP 推流初始化失败: {e}")
+            self.rtmp_process = None
+
+    def _read_file_tail(self, path: str, max_bytes: int = 16 * 1024, max_lines: int = 60) -> str:
+        """
+        读取文本文件末尾内容，用于快速输出 ffmpeg 错误原因。
+        - 只读末尾 max_bytes，避免大文件卡顿
+        """
+        try:
+            if not path or (not os.path.isfile(path)):
+                return ""
+            with open(path, "rb") as f:
+                try:
+                    f.seek(0, os.SEEK_END)
+                    size = f.tell()
+                    f.seek(max(0, size - int(max_bytes)), os.SEEK_SET)
+                except Exception:
+                    f.seek(0, os.SEEK_SET)
+                data = f.read()
+            text = data.decode("utf-8", errors="replace")
+            lines = text.splitlines()
+            if len(lines) > int(max_lines):
+                lines = lines[-int(max_lines):]
+            return "\n".join(lines).strip()
+        except Exception:
+            return ""
+
+    def _rtmp_mark_failed_and_log(self, reason: str, exc: Exception = None):
+        """
+        统一处理 RTMP/ffmpeg 写入失败：输出更多诊断信息 + 使后续逻辑触发重启。
+        """
+        proc = getattr(self, "rtmp_process", None)
+        rc = None
+        alive = False
+        try:
+            if proc is not None:
+                rc = proc.poll()
+                alive = (rc is None)
+        except Exception:
+            pass
+
+        extra = f"ffmpeg_alive={alive}, ffmpeg_returncode={rc}"
+        if exc is not None:
+            self.get_logger().warning(f"[RTMP] 推流失败: {reason}: {exc} ({extra})")
+        else:
+            self.get_logger().warning(f"[RTMP] 推流失败: {reason} ({extra})")
+
+        log_path = getattr(self, "_rtmp_ffmpeg_log_path", "")
+        if log_path:
+            tail = self._read_file_tail(log_path, max_bytes=16 * 1024, max_lines=40)
+            if tail:
+                self.get_logger().warning(f"[RTMP] ffmpeg 日志末尾(40行) @ {log_path}\n{tail}")
+            else:
+                self.get_logger().warning(f"[RTMP] ffmpeg 日志文件为空或不可读: {log_path}")
+
+        # 关闭并清理，确保后续 _push_rtmp_frame 会走重启分支
+        try:
+            if proc is not None and getattr(proc, "stdin", None) is not None:
+                try:
+                    proc.stdin.close()
+                except Exception:
+                    pass
+        finally:
             self.rtmp_process = None
 
     def _push_rtmp_frame(self, cv_image):
@@ -535,7 +638,12 @@ class PoseAdapterNode(Node):
                 f"[RTMP] 向 ffmpeg 写入触发（frame={self._frame_count}）"
             )
         except Exception as e:
-            self.get_logger().warn(f"RTMP 推流失败: {e}")
+            # 常见：Broken pipe (Errno 32) 代表 ffmpeg 已退出或 RTMP 端断开
+            err_no = getattr(e, "errno", None)
+            if err_no == 32:
+                self._rtmp_mark_failed_and_log("Broken pipe", e)
+            else:
+                self._rtmp_mark_failed_and_log("写入 ffmpeg stdin 异常", e)
 
     def _load_calib_from_file(self):
         """从标定文件加载相机内参"""

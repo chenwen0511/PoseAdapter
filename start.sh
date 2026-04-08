@@ -14,7 +14,7 @@ LOG_FILE="$LOG_DIR/pose_adapter.log"
 POSE_ADAPTER_NO_TAIL="${POSE_ADAPTER_NO_TAIL:-0}"
 DEFAULT_CALIB_FILE="$SCRIPT_DIR/src/calibrate/calibration_results/rtsp_camera_calib.yaml"
 CALIB_FILE="${CALIB_FILE:-$DEFAULT_CALIB_FILE}"
-DEFAULT_MODEL_FILE="$SCRIPT_DIR/model/best.pt"
+DEFAULT_MODEL_FILE="$SCRIPT_DIR/model/eletrict_meter/pose_bbox/best.pt"
 MODEL_FILE="${MODEL_FILE:-$DEFAULT_MODEL_FILE}"
 
 export BODY="${BODY:-ZSI-1}"
@@ -23,6 +23,9 @@ export ZSI_SDK_ROOT="${ZSI_SDK_ROOT:-$DEFAULT_ZSI_SDK_ROOT}"
 export ZSI_LOCAL_IP="${ZSI_LOCAL_IP:-192.168.234.15}"
 export ZSI_LOCAL_PORT="${ZSI_LOCAL_PORT:-43988}"
 export ZSI_DOG_IP="${ZSI_DOG_IP:-192.168.234.1}"
+
+# OpenCV/FFmpeg 拉 RTSP 时强制走 TCP，降低 UDP 丢包导致的 H.264 解码错误
+export OPENCV_FFMPEG_CAPTURE_OPTIONS="${OPENCV_FFMPEG_CAPTURE_OPTIONS:-rtsp_transport;tcp}"
 
 mkdir -p "$LOG_DIR"
 
@@ -194,7 +197,7 @@ start_service() {
   echo "日志目录: $LOG_DIR"
   echo "日志文件: $LOG_FILE"
 
-  nohup bash -lc "cd \"$SCRIPT_DIR\" && source /opt/ros/humble/setup.bash && source \"$SCRIPT_DIR/install/setup.bash\" && BODY=\"$BODY\" ZSI_SDK_ROOT=\"$ZSI_SDK_ROOT\" ZSI_LOCAL_IP=\"$ZSI_LOCAL_IP\" ZSI_LOCAL_PORT=\"$ZSI_LOCAL_PORT\" ZSI_DOG_IP=\"$ZSI_DOG_IP\" CALIB_FILE=\"$CALIB_FILE\" MODEL_FILE=\"$MODEL_FILE\" ros2 launch pose_adapter pose_adapter.launch body_type:=\"$BODY\" calib_file:=\"$CALIB_FILE\" yolo_model_path:=\"$MODEL_FILE\" $*" >> "$LOG_FILE" 2>&1 &
+  nohup bash -lc "cd \"$SCRIPT_DIR\" && source /opt/ros/humble/setup.bash && source \"$SCRIPT_DIR/install/setup.bash\" && BODY=\"$BODY\" ZSI_SDK_ROOT=\"$ZSI_SDK_ROOT\" ZSI_LOCAL_IP=\"$ZSI_LOCAL_IP\" ZSI_LOCAL_PORT=\"$ZSI_LOCAL_PORT\" ZSI_DOG_IP=\"$ZSI_DOG_IP\" CALIB_FILE=\"$CALIB_FILE\" MODEL_FILE=\"$MODEL_FILE\" OPENCV_FFMPEG_CAPTURE_OPTIONS=\"$OPENCV_FFMPEG_CAPTURE_OPTIONS\" ros2 launch pose_adapter pose_adapter.launch body_type:=\"$BODY\" calib_file:=\"$CALIB_FILE\" yolo_model_path:=\"$MODEL_FILE\" $*" >> "$LOG_FILE" 2>&1 &
   echo $! > "$PID_FILE"
   echo "已启动 (pid=$!)"
 }
