@@ -78,13 +78,17 @@ class MeterDetector:
                 
                 # 检查模型是否是 YOLO Pose 格式（带关键点）
                 try:
-                    # 获取模型的 task 类型
-                    model_info = self.model.info(verbose=False)[0]
-                    task_type = model_info.task if hasattr(model_info, 'task') else 'detect'
+                    # 不同 ultralytics 版本返回值格式不一致，做兼容处理
+                    info_ret = self.model.info(verbose=False)
+                    task_type = getattr(self.model, 'task', None)
+                    if task_type is None and isinstance(info_ret, (list, tuple)) and len(info_ret) > 0:
+                        task_type = getattr(info_ret[0], 'task', None)
+                    if task_type is None:
+                        task_type = 'unknown'
                     _loginfo(f"[Detector] 模型类型: {task_type}", logger)
                     
                     # 检查是否支持关键点
-                    if hasattr(self.model, 'keypoint_map') or task_type == 'pose':
+                    if hasattr(self.model, 'keypoint_map') or str(task_type).lower() == 'pose':
                         self.use_yolo_pose = True
                         _loginfo("[Detector] YOLO Pose 模型加载成功，支持关键点检测", logger)
                     else:
@@ -132,7 +136,29 @@ class MeterDetector:
         results = self.model(cv_image, verbose=False, device=self._device, half=False)
         detections = []
         
-        for result in results:
+        for ridx, result in enumerate(results):
+            kp_obj = getattr(result, 'keypoints', None)
+            boxes = getattr(result, 'boxes', None)
+            try:
+                box_count = len(boxes) if boxes is not None else 0
+            except Exception:
+                box_count = 0
+            has_kp_data = False
+            has_visible = False
+            kp_shape = None
+            if kp_obj is not None:
+                has_kp_data = getattr(kp_obj, 'data', None) is not None
+                has_visible = bool(getattr(kp_obj, 'has_visible', False))
+                kp_data = getattr(kp_obj, 'data', None)
+                if kp_data is not None and hasattr(kp_data, 'shape'):
+                    kp_shape = tuple(kp_data.shape)
+            _logdebug(
+                f"[Detector] result[{ridx}] boxes={box_count}, "
+                f"kp_obj={kp_obj is not None}, kp_data={has_kp_data}, "
+                f"kp_visible={has_visible}, kp_shape={kp_shape}, use_yolo_pose={self.use_yolo_pose}",
+                self.logger
+            )
+
             # 检查是否是 YOLO Pose 模型
             if self.use_yolo_pose and result.keypoints is not None:
                 # 使用 YOLO Pose 格式: bbox + keypoints
@@ -157,6 +183,11 @@ class MeterDetector:
                                     # 如果 visibility > 0.5 则认为可见
                                     visible = 1 if kp[2] > 0.5 else 0
                                     kpts.append([int(kp[0]), int(kp[1]), visible])
+                                vis_cnt = sum(1 for p in kpts if len(p) >= 3 and p[2] > 0)
+                                _logdebug(
+                                    f"[Detector] det[{i}] 提取关键点: total={len(kpts)}, visible={vis_cnt}, conf={float(conf):.3f}",
+                                    self.logger
+                                )
                             except Exception as e:
                                 _logwarn(f"[Detector] 提取关键点失败: {e}", self.logger)
                                 kpts = []

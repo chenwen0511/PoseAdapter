@@ -772,8 +772,11 @@ class MotionController(Node):
         duration = abs(np.radians(angle_deg)) / angular_speed
         duration = min(duration, timeout)
         
-        # ZSI-1 的转向符号与当前控制约定相反，这里做反向映射。
-        wz = -angular_speed if angle_deg > 0 else angular_speed
+        # 与控制层角度约定保持同号：正角左转，负角右转。
+        wz = angular_speed if angle_deg > 0 else -angular_speed
+
+        wz = -wz
+        
         vx, vy, wz = self._zsi_clamp_speed(0.0, 0.0, wz)
         
         with self._zsi_move_lock:

@@ -23,14 +23,14 @@
   <!-- 低算力：主循环 Hz，默认 5 以降低 CPU（高算力可设 10-20） -->
   <arg name="loop_hz" default="5"/>
 
-  <!-- 模型路径：默认相对工程根目录 model/best.pt -->
-  <arg name="yolo_model_path" default="model/best.pt"/>
+  <!-- 模型路径：固定为指定模型 -->
+  <arg name="yolo_model_path" default="model/eletrict_meter/pose_bbox/best.pt"/>
   <!-- 低算力设备建议 false，PaddleOCR 易引起段错误 -->
   <arg name="use_paddle_ocr" default="false"/>
   <!-- 备用检测时，最小 bbox 面积占比（0-1），默认 0.05 即 5% -->
   <arg name="min_bbox_area_ratio" default="0.05"/>
-  <!-- 关键点提取方式: bbox(默认) / contour / keypoint -->
-  <arg name="keypoint_method" default="bbox"/>
+  <!-- 关键点提取方式: keypoint(默认，优先模型关键点) / bbox / contour -->
+  <arg name="keypoint_method" default="keypoint"/>
 
   <!-- 图像来源：与 calibrate 一致，默认 /camera/image_raw（由其他节点发布相机 raw 图） -->
   <arg name="camera_image_topic" default="/camera/image_raw"/>

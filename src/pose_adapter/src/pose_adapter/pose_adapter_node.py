@@ -19,6 +19,7 @@ import threading
 import time
 import numpy as np
 import yaml
+from datetime import datetime
 
 # 添加 src 路径以便导入模块
 pkg_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -192,10 +193,7 @@ class PoseAdapterNode(Node):
             # 相对路径按工作区根目录解析
             self.yolo_model_path = os.path.abspath(os.path.join(os.getcwd(), self.yolo_model_path))
         if not os.path.isfile(self.yolo_model_path):
-            raise FileNotFoundError(
-                f"模型文件不存在: {self.yolo_model_path}。"
-                "请确认路径（例如 /home/nvidia/stephen/PoseAdapter/model/best.pt）并重新启动。"
-            )
+            raise FileNotFoundError(f"模型文件不存在: {self.yolo_model_path}")
         self.use_paddle_ocr = self.get_parameter('use_paddle_ocr').value
         self.conf_threshold = self.get_parameter('conf_threshold').value
         self.detection_iou_threshold = self.get_parameter('detection_iou_threshold').value
@@ -313,6 +311,7 @@ class PoseAdapterNode(Node):
         if isinstance(detection, dict):
             self.conf_threshold = detection.get('conf_threshold', self.conf_threshold)
             self.detection_iou_threshold = detection.get('iou_threshold', self.detection_iou_threshold)
+            self.keypoint_method = detection.get('keypoint_method', self.keypoint_method)
 
         # tracking
         tracking = cfg.get('tracking', {})
@@ -620,8 +619,18 @@ class PoseAdapterNode(Node):
                 # 大小不匹配时跳过
                 return
 
+            # 同步落盘：将推流帧写到本地 result 目录，便于定位问题
+            try:
+                result_dir = os.path.join(os.getcwd(), "result")
+                os.makedirs(result_dir, exist_ok=True)
+                ts = datetime.now().strftime("%Y%m%d_%H%M%S_%f")
+                frame_idx = int(getattr(self, "_frame_count", 0))
+                img_path = os.path.join(result_dir, f"rtmp_{ts}_{frame_idx:06d}.jpg")
+                cv2.imwrite(img_path, img)
+            except Exception as dump_err:
+                self._log_throttle("warn", "result_dump_failed", 2.0, f"[ResultDump] 写图失败: {dump_err}")
+
             # 关键：保证写入不发生"部分写入"。使用 os.write 循环直到写完整帧。
-            import os
             fd = self.rtmp_process.stdin.fileno()
             buf = memoryview(data)
             off = 0
@@ -941,13 +950,30 @@ class PoseAdapterNode(Node):
 
         # ========== 4. 关键点（4个角点） ==========
         if self.current_keypoints is not None and len(self.current_keypoints) == 4:
-            for idx, (cx, cy) in enumerate(self.current_keypoints):
+            for idx, kp in enumerate(self.current_keypoints):
+                # 兼容 [x, y] 和 [x, y, visible] 两种格式
+                if kp is None or len(kp) < 2:
+                    continue
+                cx, cy = kp[0], kp[1]
+                visible = 1
+                if len(kp) >= 3:
+                    visible = kp[2]
+                if visible <= 0:
+                    continue
                 cv2.circle(debug_image, (int(cx), int(cy)), 8, (0, 255, 255), -1)
                 cv2.putText(debug_image, str(idx), (int(cx)+8, int(cy)-8),
                            cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 255, 255), 2)
             # 连接角点形成矩形
-            pts = np.array(self.current_keypoints, dtype=np.int32)
-            cv2.polylines(debug_image, [pts], True, (0, 255, 255), 2)
+            visible_pts = []
+            for kp in self.current_keypoints:
+                if kp is None or len(kp) < 2:
+                    continue
+                if len(kp) >= 3 and kp[2] <= 0:
+                    continue
+                visible_pts.append([int(kp[0]), int(kp[1])])
+            if len(visible_pts) == 4:
+                pts = np.array(visible_pts, dtype=np.int32)
+                cv2.polylines(debug_image, [pts], True, (0, 255, 255), 2)
 
         # ========== 5. PnP 结果（距离 + yaw） ==========
         if self.current_pose is not None and self.current_pose.get('success'):

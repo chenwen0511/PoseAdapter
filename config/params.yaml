@@ -36,6 +36,7 @@ unitree_sdk:
 
 # 检测参数
 detection:
+  keypoint_method: "keypoint"  # 优先使用模型 keypoints，缺失时自动回退
   conf_threshold: 0.5
   iou_threshold: 0.45
 
