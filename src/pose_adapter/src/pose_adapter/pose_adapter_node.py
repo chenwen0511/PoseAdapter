@@ -1177,8 +1177,13 @@ class PoseAdapterNode(Node):
                 distance = pose.get('distance', 0)
                 yaw = pose.get('yaw', 0)
                 dist_diff = abs(distance - self.target_distance)
-                if abs(yaw) > self.controller.angle_tolerance:
-                    self.current_control_cmd = f"ROTATE {yaw:.1f}deg"
+                angle_error = yaw + offset[0] * 30.0
+                if abs(angle_error) > self.controller.angle_tolerance:
+                    # 与控制器保持一致：旋转角会被 step_angle 限幅后下发
+                    turn_deg = angle_error
+                    if abs(turn_deg) > self.controller.step_angle:
+                        turn_deg = self.controller.step_angle if turn_deg > 0 else -self.controller.step_angle
+                    self.current_control_cmd = f"ROTATE {turn_deg:.1f}deg"
                 elif dist_diff > self.distance_tolerance:
                     direction = "FORWARD" if distance > self.target_distance else "BACKWARD"
                     self.current_control_cmd = f"{direction} {dist_diff:.2f}m"
